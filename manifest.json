@@ -1,0 +1,50 @@
+{
+  "id": "/sire2-prep/?source=pwa",
+  "name": "SIRE 2.0 Prep",
+  "short_name": "SIRE 2.0",
+  "description": "SIRE 2.0 inspection preparation: the complete OCIMF question library, readiness tracking, findings and printable reports. Works offline.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#0a4f49",
+  "theme_color": "#0a4f49",
+  "categories": ["productivity", "utilities"],
+  "lang": "en",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Findings",
+      "short_name": "Findings",
+      "url": "./index.html#findings",
+      "icons": [{ "src": "./icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Practice",
+      "short_name": "Practice",
+      "url": "./index.html#practice",
+      "icons": [{ "src": "./icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
