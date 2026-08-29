@@ -8,7 +8,13 @@
 <meta name="description" content="SIRE 2.0 inspection preparation — the complete OCIMF question library, readiness tracking, findings and printable reports. Offline, single file.">
 <title>SIRE 2.0 Prep</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23052b26'/%3E%3Cg fill='none' stroke='%233ad9c0' stroke-width='6' stroke-linecap='round'%3E%3Cpath d='M20 62h60l-9 18H29z'/%3E%3Cpath d='M50 20v42M30 40h40'/%3E%3C/g%3E%3C/svg%3E">
-<link rel="manifest" id="manifestLink">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<!-- The href must be here in the markup: Chrome decides whether a page is
+     installable while it parses the document, and a manifest attached later
+     from script is usually too late for beforeinstallprompt to ever fire.
+     initPWA() removes the link again when there is no manifest to fetch
+     (desktop shell, file://). -->
+<link rel="manifest" id="manifestLink" href="manifest.json">
 <script>
 /* Apply the stored theme before first paint so AMOLED never flashes white. */
 (function () {
@@ -11610,6 +11616,7 @@ const PWA = {
                                        serves the latter with the wrong
                                        content-type and Chrome then ignores it */
   swURL: "sw.js",
+  manifest: null,
   deferredPrompt: null,
   promptFired: false,
   registration: null,
@@ -11627,28 +11634,19 @@ function isStandalone() {
   } catch (e) { return false; }
 }
 
-async function initPWA() {
-  if (!isHTTP()) return;
-
-  /* Link the manifest only once it is known to be there — a 404 in the
-     network log is noise, and under the desktop shell there is no manifest. */
-  try {
-    const res = await fetch(PWA.manifestURL, { method: "GET", cache: "no-cache" });
-    if (res.ok) {
-      const link = $("#manifestLink");
-      if (link) link.setAttribute("href", PWA.manifestURL);
-      PWA.manifest = await res.json();
-    }
-  } catch (e) { /* offline or absent — the app still works */ }
-
-  if ("serviceWorker" in navigator) {
-    try {
-      PWA.registration = await navigator.serviceWorker.register(PWA.swURL, { scope: "./" });
-    } catch (e) {
-      console.warn("service worker registration failed", e);
-    }
+function initPWA() {
+  /* No manifest exists under the desktop shell or on file://, so drop the
+     link rather than leave a 404 in the network log. */
+  if (!isHTTP()) {
+    const link = $("#manifestLink");
+    if (link) link.removeAttribute("href");
+    return;
   }
 
+  /* Listen before anything is awaited. Chrome fires beforeinstallprompt as
+     soon as it has the manifest and an active service worker, and an event
+     that arrives before the listener exists is gone for good — the Install
+     button would then stay greyed out for the whole visit. */
   window.addEventListener("beforeinstallprompt", e => {
     e.preventDefault();
     PWA.deferredPrompt = e;
@@ -11662,6 +11660,23 @@ async function initPWA() {
     toast("Installed");
     if (currentView === "settings") renderPWA();
   });
+
+  return (async () => {
+    if ("serviceWorker" in navigator) {
+      try {
+        PWA.registration = await navigator.serviceWorker.register(PWA.swURL, { scope: "./" });
+      } catch (e) {
+        console.warn("service worker registration failed", e);
+      }
+    }
+
+    /* Read separately from the browser's own copy, purely so the
+       installation checks can report on the contents. */
+    try {
+      const res = await fetch(PWA.manifestURL, { method: "GET", cache: "no-cache" });
+      if (res.ok) PWA.manifest = await res.json();
+    } catch (e) { /* offline or absent — the app still works */ }
+  })();
 }
 
 async function doInstall() {
@@ -11717,6 +11732,15 @@ async function pwaChecks() {
     detail: PWA.registration ? ("scope " + PWA.registration.scope) : "Not registered — sw.js may be missing."
   });
 
+  const link = $("#manifestLink");
+  const linked = !!(link && link.getAttribute("href"));
+  out.push({
+    ok: linked,
+    label: "Manifest linked in the page",
+    detail: linked ? 'rel="manifest" href="' + link.getAttribute("href") + '"'
+                   : "The <link rel=\"manifest\"> tag has no href, so Chrome never sees the manifest."
+  });
+
   const manifestOK = await reachable(PWA.manifestURL);
   out.push({
     ok: manifestOK,
@@ -11736,7 +11760,7 @@ async function pwaChecks() {
   });
 
   if (m) {
-    const need = ["name", "short_name", "start_url", "display", "icons", "id"];
+    const need = ["name", "short_name", "start_url", "display", "icons"];
     const missing = need.filter(k => !m[k]);
     out.push({
       ok: missing.length === 0,
