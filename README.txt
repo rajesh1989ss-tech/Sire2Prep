@@ -26,6 +26,14 @@ Bump CACHE_VERSION at the top of sw.js (e.g. sire2-v1.0.1) and re-upload.
 Without that, phones already carrying the old service worker may keep
 serving the previous copy from cache.
 
+Back button
+-----------
+The back gesture moves through the app rather than leaving it:
+  * an open sheet or report preview closes first
+  * from any page it returns to the previous one, or to the dashboard
+  * on the dashboard it asks once, and a second press within two
+    seconds closes the app
+
 Notes
 -----
   * The manifest deliberately uses the .json extension. GitHub Pages
