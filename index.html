@@ -9392,8 +9392,15 @@ function show(view, opts) {
   if (VIEWS.indexOf(view) === -1) view = "dashboard";
 
   if (!(opts && opts.fromBack) && currentView && currentView !== view) {
-    navStack.push(currentView);
-    if (navStack.length > NAV_MAX) navStack.shift();
+    /* Returning to somewhere already behind us unwinds to it instead of
+       stacking another copy. Without this, ten taps between two tabs would
+       leave twenty presses standing between the user and the way out. */
+    const seen = navStack.indexOf(view);
+    if (seen !== -1) navStack.length = seen;
+    else {
+      navStack.push(currentView);
+      if (navStack.length > NAV_MAX) navStack.shift();
+    }
   }
   navResume();
 
