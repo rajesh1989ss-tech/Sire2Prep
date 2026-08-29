@@ -8600,18 +8600,85 @@ const Store = {
     return null;
   },
 
+  lastError: null,
+
   async save(state) {
     const json = JSON.stringify(state);
+    this.lastError = null;
     if (this.mode === "desktop") {
       try { await DESK.save_state(json); return true; }
       catch (e) { console.warn("desktop save failed, falling back", e); }
     }
     try { await idbSet("state", json); return true; }
-    catch (e) { console.warn("idb save failed", e); }
+    catch (e) { this.lastError = e; console.warn("idb save failed", e); }
     try { localStorage.setItem(LS_PREFIX + "state", json); return true; }
-    catch (e) { console.error("all saves failed", e); return false; }
+    catch (e) {
+      /* localStorage is a 5 MB last resort; when IndexedDB was the real
+         failure its error is the one worth reporting. */
+      this.lastError = this.lastError || e;
+      console.error("all saves failed", e);
+      return false;
+    }
   }
 };
+
+/* ============================================================================
+   Storage durability.
+
+   IndexedDB is "best effort" until something asks otherwise: Chrome may clear
+   the whole database when the phone runs low on space, taking every inspection
+   and photograph with it. persist() lifts it out of that pool — for an
+   installed PWA Chrome grants it silently — and estimate() gives Settings a
+   real figure instead of a record count.
+   ========================================================================= */
+
+const Quota = {
+  persisted: null,          /* true / false, or null where unsupported */
+
+  async refresh() {
+    if (!navigator.storage || !navigator.storage.persisted) return null;
+    try { this.persisted = await navigator.storage.persisted(); }
+    catch (e) { this.persisted = null; }
+    return this.persisted;
+  },
+
+  /* Safe to ask repeatedly: a browser that declines today may grant once the
+     app is installed, which is why this runs again on appinstalled. */
+  async request() {
+    if (!navigator.storage || !navigator.storage.persist) return null;
+    try {
+      if (await navigator.storage.persisted()) return (this.persisted = true);
+      return (this.persisted = await navigator.storage.persist());
+    } catch (e) { return (this.persisted = null); }
+  },
+
+  async estimate() {
+    if (!navigator.storage || !navigator.storage.estimate) return null;
+    try {
+      const e = await navigator.storage.estimate();
+      if (!e || !e.quota) return null;
+      const usage = e.usage || 0;
+      return { usage: usage, quota: e.quota, pct: usage / e.quota * 100 };
+    } catch (e) { return null; }
+  }
+};
+
+function fmtBytes(n) {
+  if (typeof n !== "number" || !isFinite(n)) return "—";
+  const unit = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < unit.length - 1) { n /= 1024; i++; }
+  return (i === 0 ? String(Math.round(n)) : n.toFixed(n < 10 ? 1 : 0)) + " " + unit[i];
+}
+
+/* A full origin reports itself differently depending on which write hit the
+   ceiling; to the user they all mean the same thing. */
+function isQuotaError(e) {
+  if (!e) return false;
+  if (e.name === "QuotaExceededError" || e.name === "NS_ERROR_DOM_QUOTA_REACHED") return true;
+  if (e.code === 22 || e.code === 1014) return true;
+  return /quota|storage is full|exceeded the storage/i.test(e.message || "");
+}
 
 /* ============================================================== state */
 
@@ -8660,8 +8727,10 @@ async function flush() {
   saveInFlight = true;
   const ok = await Store.save(STATE);
   saveInFlight = false;
-  if (ok) dirty = false;
-  else toast("Could not save — check storage in Settings.");
+  if (ok) { dirty = false; return; }
+  toast(isQuotaError(Store.lastError)
+    ? "Storage is full — nothing was saved. Delete photos, or export a backup and remove an old inspection."
+    : "Could not save — check Storage in Settings.");
 }
 
 /* -------------------------------------------------------- campaigns */
@@ -8971,6 +9040,14 @@ async function attachPhotos(files, target) {
       });
       added.push({ id: id, w: scaled.w, h: scaled.h, name: scaled.name, caption: "", created: nowISO() });
     } catch (e) {
+      /* Once the origin is full every remaining file fails the same way, so
+         report it once rather than one toast per photo. */
+      if (isQuotaError(e)) {
+        const left = files.length - i;
+        toast("Storage is full — " + left + " photo" + (left > 1 ? "s" : "") +
+              " not added. Free space in Settings → Storage.");
+        break;
+      }
       toast(e.message || "Could not add photo");
     }
   }
@@ -9231,6 +9308,34 @@ function render(view) {
   if (view === "profile")     renderProfile();
   if (view === "settings")    renderSettings();
   renderChrome();
+}
+
+/* Filled in after renderSettings paints: both figures come from promises, and
+   the panel is more useful late than not at all. */
+async function renderStorageBytes() {
+  const host = $("#storageBytes");
+  if (!host) return;
+
+  if (Store.mode === "desktop") {
+    host.innerHTML = '<span class="tiny">Stored in the desktop database — no browser quota applies.</span>';
+    return;
+  }
+
+  const est = await Quota.estimate();
+  await Quota.refresh();
+  if (!$("#storageBytes")) return;          /* settings left while we waited */
+
+  const durability = Quota.persisted === true
+    ? '<span style="color:var(--ok)">Persistent</span> — Android will not reclaim this app\'s data.'
+    : Quota.persisted === false
+      ? '<b style="color:var(--warn)">Not persistent</b> — Android may clear this app\'s data if the phone runs low on space. Installing the app usually earns persistence; export a backup either way.'
+      : "This browser does not report whether storage is protected from clearing.";
+
+  host.innerHTML = (est
+    ? "<b>" + fmtBytes(est.usage) + "</b> used of " + fmtBytes(est.quota) +
+      " (" + (est.pct < 1 ? est.pct.toFixed(2) : Math.round(est.pct)) + "%)<br>"
+    : "This browser does not report storage usage.<br>") +
+    '<span class="tiny">' + durability + "</span>";
 }
 
 function renderChrome() {
@@ -9842,7 +9947,10 @@ function renderSettings() {
   $("#storageStatus").innerHTML +=
     "<br>" + photoCount() + " photos · " + Object.keys(STATE.findings).length + " findings · " +
     Object.keys(STATE.practice).length + " practice cards" +
-    "<br><span class=\"tiny\">Photos are stored outside the state blob, so automatic backups stay small.</span>";
+    '<div id="storageBytes" style="margin-top:8px">Measuring…</div>' +
+    "<span class=\"tiny\">Photos are stored outside the state blob, so automatic backups stay small.</span>";
+
+  renderStorageBytes();
 
   $("#libStatus").innerHTML =
     esc(LIB.source) + "<br>" +
@@ -11750,6 +11858,9 @@ function initPWA() {
     PWA.deferredPrompt = null;
     PWA.lastOutcome = "installed";
     toast("Installed");
+    /* Chrome grants persistence to installed apps, so the refusal at boot is
+       worth retrying the moment installation completes. */
+    Quota.request().then(() => { if (currentView === "settings") renderStorageBytes(); });
     if (currentView === "settings") renderPWA();
   });
 
@@ -12029,6 +12140,11 @@ async function boot() {
   }
 
   await Store.init();
+
+  /* Ask before the first inspection is written, not after. Chrome decides
+     silently from its own heuristics; a refusal now is retried on install. */
+  if (Store.mode !== "desktop") Quota.request();
+
   STATE = migrate(await Store.load());
 
   if (!STATE.campaigns.length) {
