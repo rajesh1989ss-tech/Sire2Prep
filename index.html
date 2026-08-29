@@ -9197,6 +9197,13 @@ let backTo = "library";
 
 function show(view, opts) {
   if (VIEWS.indexOf(view) === -1) view = "dashboard";
+
+  if (!(opts && opts.fromBack) && currentView && currentView !== view) {
+    navStack.push(currentView);
+    if (navStack.length > NAV_MAX) navStack.shift();
+  }
+  navResume();
+
   currentView = view;
   VIEWS.forEach(v => {
     const el = document.getElementById("v-" + v);
@@ -9229,6 +9236,91 @@ function render(view) {
 function renderChrome() {
   const c = activeCampaign();
   $("#campaignLabel").textContent = c ? (c.vessel || c.name || "Inspection") : "No inspection";
+}
+
+/* ============================================================================
+   Back navigation.
+
+   Android's back gesture closes a standalone PWA as soon as history runs out,
+   which throws away an inspection mid-edit on the first stray swipe. One spare
+   history entry is kept ahead of the launch entry at all times: a press lands
+   on the launch entry, popstate runs the app's own back step, and the spare is
+   pushed again. Only on the dashboard with nothing left to unwind is the spare
+   withheld, so the following press falls through to Chrome and closes the app
+   — two presses, and only from the home view.
+   ========================================================================= */
+
+const NAV_MAX     = 40;     /* views remembered — deeper than any real session */
+const EXIT_WINDOW = 2000;   /* ms in which the confirming press must arrive    */
+
+let navStack  = [];
+let guardUp   = false;
+let exitArmed = false;
+let exitTimer = null;
+
+function navGuard() {
+  if (guardUp) return;
+  try { history.pushState({ sire: "guard" }, ""); guardUp = true; } catch (e) { }
+}
+
+/* Any forward move cancels a half-finished exit and puts the spare back, so a
+   press after "press back again" navigates rather than closing the app. */
+function navResume() {
+  exitArmed = false;
+  clearTimeout(exitTimer);
+  navGuard();
+}
+
+/* Overlays peel off one press at a time, innermost first. */
+function closeTopOverlay() {
+  const rep = $("#reportOverlay");
+  if (rep && rep.classList.contains("on")) { closeReport(); return true; }
+  const sheet = $("#sheet");
+  if (sheet && sheet.classList.contains("on")) { closeSheet(); return true; }
+  return false;
+}
+
+/* One step back. False means there is nowhere left to go — the caller's cue
+   to start the exit countdown. */
+function navBack() {
+  if (closeTopOverlay()) return true;
+
+  if (navStack.length) {
+    show(navStack.pop(), { fromBack: true });
+    return true;
+  }
+  /* Opened straight into a question (a shortcut, a restored session): fall
+     back to wherever that question was reached from. */
+  if (currentView === "detail") {
+    show(backTo || "library", { fromBack: true });
+    return true;
+  }
+  if (currentView !== "dashboard") {
+    show("dashboard", { fromBack: true });
+    return true;
+  }
+  return false;
+}
+
+function initNav() {
+  if (!window.history || !history.pushState) return;
+  try { history.replaceState({ sire: "root" }, ""); } catch (e) { return; }
+  navGuard();
+
+  window.addEventListener("popstate", () => {
+    guardUp = false;                  /* the press has just consumed it */
+
+    if (navBack()) { navResume(); return; }
+
+    /* On the dashboard with an empty stack. The first press arms and leaves
+       the spare off; the next one reaches the launch entry and Chrome closes
+       the app. If it never comes, the spare goes back and nothing changed. */
+    if (exitArmed) return;
+    exitArmed = true;
+    toast("Press back again to exit");
+    clearTimeout(exitTimer);
+    exitTimer = setTimeout(() => { exitArmed = false; navGuard(); }, EXIT_WINDOW);
+  });
 }
 
 /* --------------------------------------------------------- rich blocks */
@@ -9560,7 +9652,7 @@ function renderDetail() {
       '<div id="dFindings"></div>' +
     '</div>';
 
-  $("#dBack").onclick = () => show(backTo, { keepScroll: false });
+  $("#dBack").onclick = () => navBack();
 
   $$("#dStatus button").forEach(b => {
     b.onclick = () => {
@@ -11958,6 +12050,7 @@ async function boot() {
 
   wire();
   wireReports();
+  initNav();
   show("dashboard");
   initPWA();
 }

@@ -5,7 +5,7 @@
    cache as the offline fallback. Bump CACHE_VERSION on every deploy.
    ========================================================================= */
 
-const CACHE_VERSION = "sire2-v1.0.1";
+const CACHE_VERSION = "sire2-v1.0.2";
 const OFFLINE_URL = "./offline.html";
 
 const ASSETS = [
