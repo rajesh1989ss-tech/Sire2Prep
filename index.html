@@ -82,6 +82,18 @@ body {
 button, nav.tabs, .statusbar, .chip, .pill, .page-head, .page-foot, .rep-toolbar {
   -webkit-user-select:none; -moz-user-select:none; user-select:none;
 }
+/* A host shell can inject its own "body { user-select:none }" at runtime,
+   after this stylesheet, and win on source order. These rules are deliberately
+   forced so the guidance text stays copyable whatever the host does. */
+main, .card, .blk, .qcard, .page, table.rt, .kv,
+.blk p, .blk li, .blk ul, .card p, .card li,
+#detailBody, #reportDoc, textarea, input {
+  -webkit-user-select:text !important;
+  -moz-user-select:text !important;
+  user-select:text !important;
+  cursor:auto;
+}
+.blk p, .blk li, #detailBody p, #detailBody li { cursor:text }
 /* long identifiers (IMO circular references, question ids) must wrap rather
    than force the whole page sideways */
 .blk p, .blk li, .qrow .t, .card, .page p, .page li, table.rt td {
@@ -311,6 +323,49 @@ table.grid tbody tr:nth-child(even) { background:var(--surface2) }
 .photos .ph-img img { display:block; width:100%; height:auto }
 .photos figcaption { padding:8px; display:flex; gap:7px; align-items:center }
 .photos figcaption input { flex:1 1 auto }
+
+/* ====================================================== ANNOTATIONS ==== */
+/* Highlight colours stay light with dark text in every theme — a highlighter
+   reads the same way on paper as it does on a black screen. */
+.hl-yellow { background:#fde68a; color:#1f1a05; border-radius:2px }
+.hl-green  { background:#bbf7d0; color:#08240f; border-radius:2px }
+.hl-blue   { background:#bfdbfe; color:#08203f; border-radius:2px }
+.hl-pink   { background:#fbcfe8; color:#360a22; border-radius:2px }
+.an-b { font-weight:800 }
+.an-i { font-style:italic }
+.an-u { text-decoration:underline; text-decoration-thickness:2px; text-underline-offset:3px }
+
+.mark-bar {
+  position:fixed; left:50%; transform:translateX(-50%) translateY(10px);
+  bottom:calc(84px + env(safe-area-inset-bottom));
+  z-index:60; opacity:0; pointer-events:none; transition:opacity .14s, transform .14s;
+  background:var(--surface); border:1px solid var(--line-strong);
+  border-radius:999px; box-shadow:var(--shadow-lg); padding:7px 10px;
+  -webkit-user-select:none; user-select:none;
+}
+.mark-bar.on { opacity:1; pointer-events:auto; transform:translateX(-50%) translateY(0) }
+.mark-bar .mb-inner { display:flex; align-items:center; gap:7px }
+.mark-bar button {
+  border:1px solid var(--line-strong); background:var(--bg); color:var(--text);
+  border-radius:8px; cursor:pointer; min-width:34px; height:34px; padding:0 8px;
+  font-size:15px; line-height:1; display:grid; place-items:center;
+}
+.mark-bar button:hover { border-color:var(--accent) }
+.mark-bar .mb-sw { width:30px; min-width:30px; border-radius:50%; border:2px solid var(--line-strong) }
+.mark-bar .mb-sw:hover { border-color:var(--text) }
+.mark-bar .mb-b { font-weight:900 }
+.mark-bar .mb-i { font-style:italic; font-family:Georgia,serif }
+.mark-bar .mb-u { text-decoration:underline }
+.mark-bar .mb-x { font-size:12.5px; font-weight:700; padding:0 11px }
+.mark-bar .mb-sep { width:1px; height:22px; background:var(--line) }
+
+/* highlights must survive Print to PDF */
+@media print {
+  .hl-yellow, .hl-green, .hl-blue, .hl-pink {
+    -webkit-print-color-adjust:exact; print-color-adjust:exact;
+  }
+  .mark-bar { display:none !important }
+}
 
 /* attachments */
 .filerow {
@@ -835,6 +890,8 @@ table.rt td.mono { font-family: "Cascadia Mono", Consolas, monospace; white-spac
     </button>
   </div>
 </nav>
+
+<div class="mark-bar" id="markBar"></div>
 
 <div class="toast" id="toast"></div>
 
@@ -8679,8 +8736,9 @@ function blankState() {
     answers: {},        /* "<campaign>::<qid>" -> record            */
     particulars: {},    /* "<campaign>::<pid>" -> record            */
     profiles: {},       /* "<campaign>"        -> profile record    */
-    findings: {},       /* reserved — step 3                        */
-    practice: {},       /* reserved — step 3                        */
+    findings: {},       /* severity, close-out, photos              */
+    practice: {},       /* Leitner boxes, global rather than per ship */
+    annotations: {},    /* highlights and text styling over the library */
     settings: { theme: "light" },
     modified: nowISO()
   };
@@ -9381,6 +9439,228 @@ function fileCount() {
 }
 
 /* ============================================================================
+   Annotations — highlight, bold, italic and underline over the library text.
+
+   The OCIMF text is read-only, so marks are stored as an overlay: a field, a
+   block index and a character range, plus the marked text itself so a mark can
+   be verified rather than blindly reapplied. Marks are global rather than
+   per inspection — what you have learned about a question carries across ships.
+   ========================================================================= */
+
+const MARK_STYLES = [
+  { k: "hl-yellow", label: "Yellow", kind: "highlight", swatch: "#fde68a" },
+  { k: "hl-green",  label: "Green",  kind: "highlight", swatch: "#bbf7d0" },
+  { k: "hl-blue",   label: "Blue",   kind: "highlight", swatch: "#bfdbfe" },
+  { k: "hl-pink",   label: "Pink",   kind: "highlight", swatch: "#fbcfe8" },
+  { k: "an-b",      label: "Bold",       kind: "text" },
+  { k: "an-i",      label: "Italic",     kind: "text" },
+  { k: "an-u",      label: "Underline",  kind: "text" }
+];
+
+const HIGHLIGHT_KEYS = MARK_STYLES.filter(s => s.kind === "highlight").map(s => s.k);
+const MARK_KEYS = MARK_STYLES.map(s => s.k);
+
+function annRecord(qid, create) {
+  if (!STATE.annotations) STATE.annotations = {};
+  let rec = STATE.annotations[qid];
+  if (!rec && create) {
+    rec = { id: qid, qid: qid, marks: [], created: nowISO(), modified: nowISO(), deleted: false };
+    STATE.annotations[qid] = rec;
+  }
+  return rec || null;
+}
+
+function annMarks(qid) {
+  const rec = annRecord(qid, false);
+  return (rec && !rec.deleted && rec.marks) || [];
+}
+
+function annMarksFor(qid, field, block) {
+  return annMarks(qid).filter(m => m.field === field && m.block === block);
+}
+
+function annCount(qid) {
+  return annMarks(qid).length;
+}
+
+/* Add a style over a set of ranges. Highlights are mutually exclusive, so a
+   new one replaces any earlier highlight underneath it; bold, italic and
+   underline stack freely. */
+function addMarks(qid, ranges, style) {
+  if (!ranges || !ranges.length || MARK_KEYS.indexOf(style) === -1) return 0;
+  const rec = annRecord(qid, true);
+  let added = 0;
+
+  ranges.forEach(r => {
+    if (!r || r.end <= r.start) return;
+    if (HIGHLIGHT_KEYS.indexOf(style) !== -1) {
+      rec.marks = rec.marks.filter(m => !(
+        HIGHLIGHT_KEYS.indexOf(m.style) !== -1 &&
+        m.field === r.field && m.block === r.block &&
+        m.start < r.end && m.end > r.start));
+    } else {
+      /* the same style twice over the same span is a no-op */
+      const dup = rec.marks.some(m => m.style === style && m.field === r.field &&
+        m.block === r.block && m.start <= r.start && m.end >= r.end);
+      if (dup) return;
+    }
+    rec.marks.push({
+      id: uid("mk"), field: r.field, block: r.block,
+      start: r.start, end: r.end, style: style,
+      text: String(r.text || "").slice(0, 300), created: nowISO()
+    });
+    added++;
+  });
+
+  rec.marks.sort((a, b) => (a.field + "").localeCompare(b.field) || a.block - b.block || a.start - b.start);
+  rec.modified = nowISO();
+  markDirty();
+  return added;
+}
+
+/* Remove every mark that overlaps the given ranges. */
+function clearMarks(qid, ranges) {
+  const rec = annRecord(qid, false);
+  if (!rec || !rec.marks.length) return 0;
+  const before = rec.marks.length;
+  rec.marks = rec.marks.filter(m => !ranges.some(r =>
+    m.field === r.field && m.block === r.block && m.start < r.end && m.end > r.start));
+  const removed = before - rec.marks.length;
+  if (removed) { rec.modified = nowISO(); markDirty(); }
+  return removed;
+}
+
+function clearAllMarks(qid) {
+  const rec = annRecord(qid, false);
+  if (!rec) return 0;
+  const n = rec.marks.length;
+  rec.marks = [];
+  rec.modified = nowISO();
+  markDirty();
+  return n;
+}
+
+/* Render one block's text with its marks applied.
+
+   Styles can overlap, so this works per character: build the set of styles
+   covering each character, then emit one span per run of identical styles.
+   That way a bold word inside a highlight comes out right. */
+function markupText(text, qid, field, block) {
+  const src = String(text == null ? "" : text);
+  const marks = qid ? annMarksFor(qid, field, block) : [];
+  if (!marks.length) return esc(src);
+
+  const n = src.length;
+  const at = new Array(n);
+  let any = false;
+
+  marks.forEach(m => {
+    const s = Math.max(0, Math.min(n, m.start | 0));
+    const e = Math.max(0, Math.min(n, m.end | 0));
+    for (let i = s; i < e; i++) {
+      if (!at[i]) at[i] = {};
+      at[i][m.style] = true;
+      any = true;
+    }
+  });
+  if (!any) return esc(src);
+
+  const keyOf = i => {
+    const o = at[i];
+    if (!o) return "";
+    return MARK_KEYS.filter(k => o[k]).join(" ");
+  };
+
+  let out = "", runStart = 0, runKey = keyOf(0);
+  for (let i = 1; i <= n; i++) {
+    const k = i < n ? keyOf(i) : "\u0000";
+    if (k !== runKey) {
+      const chunk = esc(src.slice(runStart, i));
+      out += runKey ? '<span class="' + runKey + '">' + chunk + "</span>" : chunk;
+      runStart = i;
+      runKey = k;
+    }
+  }
+  return out;
+}
+
+/* ------------------------------------------------- selection to ranges */
+
+/* Character offset of a point inside a block element. */
+function offsetWithin(root, node, offset) {
+  if (node === root) {
+    let n = 0;
+    for (let i = 0; i < offset && i < root.childNodes.length; i++) {
+      n += (root.childNodes[i].textContent || "").length;
+    }
+    return n;
+  }
+  let total = 0;
+  const walk = el => {
+    for (const child of el.childNodes) {
+      if (child === node) { total += offset; return true; }
+      if (child.nodeType === 3) {
+        total += (child.nodeValue || "").length;
+      } else if (child.contains && child.contains(node)) {
+        return walk(child);
+      } else {
+        total += (child.textContent || "").length;
+      }
+    }
+    return false;
+  };
+  walk(root);
+  return total;
+}
+
+function closestBlock(node) {
+  let el = node && (node.nodeType === 1 ? node : node.parentElement);
+  while (el && !(el.dataset && el.dataset.f !== undefined)) el = el.parentElement;
+  return el || null;
+}
+
+/* Convert the live selection into per-block ranges. Returns [] when there is
+   nothing selected inside the annotatable area. */
+function selectionRanges() {
+  const sel = typeof window.getSelection === "function" ? window.getSelection() : null;
+  if (!sel || sel.isCollapsed || !sel.rangeCount) return [];
+  const range = sel.getRangeAt(0);
+
+  const startEl = closestBlock(range.startContainer);
+  const endEl = closestBlock(range.endContainer);
+  if (!startEl && !endEl) return [];
+
+  const host = document.getElementById("detailBody");
+  if (!host) return [];
+  const blocks = Array.prototype.slice.call(host.querySelectorAll("[data-f]"));
+  const iStart = blocks.indexOf(startEl);
+  const iEnd = blocks.indexOf(endEl);
+  if (iStart === -1 && iEnd === -1) return [];
+
+  const from = iStart === -1 ? 0 : iStart;
+  const to = iEnd === -1 ? blocks.length - 1 : iEnd;
+  const out = [];
+
+  for (let i = Math.min(from, to); i <= Math.max(from, to); i++) {
+    const el = blocks[i];
+    const text = el.textContent || "";
+    let s = 0, e = text.length;
+    if (el === startEl) s = offsetWithin(el, range.startContainer, range.startOffset);
+    if (el === endEl) e = offsetWithin(el, range.endContainer, range.endOffset);
+    if (s > e) { const t = s; s = e; e = t; }
+    if (e > s) {
+      out.push({
+        field: el.dataset.f,
+        block: parseInt(el.dataset.i, 10) || 0,
+        start: s, end: e,
+        text: text.slice(s, e)
+      });
+    }
+  }
+  return out;
+}
+
+/* ============================================================================
    Views
    ========================================================================= */
 
@@ -9429,21 +9709,24 @@ function renderChrome() {
 
 /* --------------------------------------------------------- rich blocks */
 
-function blocksHTML(blocks) {
+function blocksHTML(blocks, field, qid) {
   if (typeof blocks === "string") blocks = blocks ? [{ t: "p", x: blocks }] : [];
   if (!blocks || !blocks.length || typeof blocks.forEach !== "function")
     return '<p class="small">Not stated in the OCIMF library.</p>';
   let html = "", inList = false;
-  blocks.forEach(b => {
+  blocks.forEach((b, i) => {
     const t = (b && b.t) || "p";
-    const x = esc((b && (b.x || b.text)) || (typeof b === "string" ? b : ""));
-    if (!x) return;
+    const raw = (b && (b.x || b.text)) || (typeof b === "string" ? b : "");
+    if (!raw) return;
+    /* data-f / data-i let a selection be turned back into a stored range */
+    const attr = field ? ' data-f="' + esc(field) + '" data-i="' + i + '"' : "";
+    const body = field ? markupText(raw, qid, field, i) : esc(raw);
     if (t === "li") {
       if (!inList) { html += "<ul>"; inList = true; }
-      html += "<li>" + x + "</li>";
+      html += "<li" + attr + ">" + body + "</li>";
     } else {
       if (inList) { html += "</ul>"; inList = false; }
-      html += "<p>" + x + "</p>";
+      html += "<p" + attr + ">" + body + "</p>";
     }
   });
   if (inList) html += "</ul>";
@@ -9689,11 +9972,18 @@ function renderDetail() {
       '<div class="tiny">' + esc(q.chapter + ". " + (LIB.chapterTitles[q.chapter] || "")) +
         " · " + esc(q.section) + " " + esc(q.sectionTitle) + '</div>' +
       '<h1 style="margin:6px 0 8px">' + esc(q.short || "") + '</h1>' +
-      '<p style="font-size:15.5px;line-height:1.6">' + esc(q.question) + '</p>' +
+      '<p style="font-size:15.5px;line-height:1.6" data-f="question" data-i="0">' +
+        markupText(q.question, q.id, "question", 0) + '</p>' +
       '<div class="row" style="margin-top:10px">' +
         (q.vesselTypes || []).map(v => '<span class="pill tag">' + esc(v) + '</span>').join("") +
         (q.roviq || []).map(r => '<span class="pill plain">' + esc(r) + '</span>').join("") +
       '</div>' +
+      (annCount(q.id)
+        ? '<div class="row" style="margin-top:10px">' +
+          '<span class="pill tag">' + annCount(q.id) + ' mark' + (annCount(q.id) === 1 ? "" : "s") + '</span>' +
+          '<button class="btn sm ghost" id="dClearMarks">Clear all marks</button></div>'
+        : '<div class="tiny" style="margin-top:10px">Select any text below to highlight, ' +
+          'bold, italicise or underline it.</div>') +
       (applicable ? "" :
         '<div class="banner warn" style="margin-top:11px"><div>Hidden by the vessel profile — ' +
         esc(excl[q.section] || "vessel type") + '.</div></div>') +
@@ -9727,18 +10017,18 @@ function renderDetail() {
         '</div>' +
       '</div>' : "") +
 
-    '<div class="card"><div class="blk"><h3>Objective</h3>' + blocksHTML(q.objective) + '</div>' +
+    '<div class="card"><div class="blk"><h3>Objective</h3>' + blocksHTML(q.objective, "objective", q.id) + '</div>' +
       (q.guidance && q.guidance.length ?
-        '<div class="blk"><h3>Industry guidance</h3>' + blocksHTML(q.guidance) + '</div>' : "") + '</div>' +
+        '<div class="blk"><h3>Industry guidance</h3>' + blocksHTML(q.guidance, "guidance", q.id) + '</div>' : "") + '</div>' +
 
-    '<div class="card"><div class="blk"><h3>Inspection guidance</h3>' + blocksHTML(q.inspection) + '</div></div>' +
+    '<div class="card"><div class="blk"><h3>Inspection guidance</h3>' + blocksHTML(q.inspection, "inspection", q.id) + '</div></div>' +
 
-    '<div class="card"><div class="blk"><h3>Suggested inspector actions</h3>' + blocksHTML(q.actions) + '</div></div>' +
+    '<div class="card"><div class="blk"><h3>Suggested inspector actions</h3>' + blocksHTML(q.actions, "actions", q.id) + '</div></div>' +
 
-    '<div class="card"><div class="blk"><h3>Expected evidence</h3>' + blocksHTML(q.evidence) + '</div></div>' +
+    '<div class="card"><div class="blk"><h3>Expected evidence</h3>' + blocksHTML(q.evidence, "evidence", q.id) + '</div></div>' +
 
     '<div class="card"><div class="blk"><h3>Potential grounds for a negative observation</h3>' +
-      blocksHTML(q.negatives) + '</div></div>' +
+      blocksHTML(q.negatives, "negatives", q.id) + '</div></div>' +
 
     (q.publications && q.publications.length ?
       '<div class="card"><div class="blk"><h3>Publications</h3><ul>' +
@@ -9760,6 +10050,14 @@ function renderDetail() {
     '</div>';
 
   $("#dBack").onclick = () => show(backTo, { keepScroll: false });
+
+  const cm = $("#dClearMarks");
+  if (cm) cm.onclick = () => {
+    if (!confirm("Remove every mark on this question?")) return;
+    const n = clearAllMarks(q.id);
+    toast(n + " mark" + (n === 1 ? "" : "s") + " removed");
+    renderDetail();
+  };
 
   $$("#dStatus button").forEach(b => {
     b.onclick = () => {
@@ -10497,6 +10795,80 @@ function wireAttachControls(prefix, target, repaint) {
 }
 
 /* ============================================================================
+   The markup toolbar — appears while text is selected in the library detail
+   ========================================================================= */
+
+let markBarRanges = [];
+
+function markBarHTML() {
+  return '<div class="mb-inner">' +
+    MARK_STYLES.filter(s => s.kind === "highlight").map(s =>
+      '<button class="mb-sw" data-style="' + s.k + '" title="' + esc(s.label) +
+      '" aria-label="' + esc(s.label) + '" style="background:' + s.swatch + '"></button>').join("") +
+    '<span class="mb-sep"></span>' +
+    '<button class="mb-b" data-style="an-b" title="Bold" aria-label="Bold">B</button>' +
+    '<button class="mb-i" data-style="an-i" title="Italic" aria-label="Italic">I</button>' +
+    '<button class="mb-u" data-style="an-u" title="Underline" aria-label="Underline">U</button>' +
+    '<span class="mb-sep"></span>' +
+    '<button class="mb-x" data-erase="1" title="Remove marks" aria-label="Remove marks">Erase</button>' +
+  "</div>";
+}
+
+function hideMarkBar() {
+  const bar = $("#markBar");
+  if (bar) bar.classList.remove("on");
+  markBarRanges = [];
+}
+
+function showMarkBar(ranges) {
+  const bar = $("#markBar");
+  if (!bar) return;
+  markBarRanges = ranges;
+  if (!bar.innerHTML) {
+    bar.innerHTML = markBarHTML();
+    $$("#markBar [data-style]").forEach(b => {
+      /* mousedown, not click: clicking would clear the selection first */
+      b.addEventListener("mousedown", e => e.preventDefault());
+      b.onclick = () => applyMark(b.dataset.style);
+    });
+    const x = $("#markBar [data-erase]");
+    x.addEventListener("mousedown", e => e.preventDefault());
+    x.onclick = () => applyMark(null);
+  }
+  bar.classList.add("on");
+}
+
+function applyMark(style) {
+  const q = BYID[detailQid];
+  if (!q || !markBarRanges.length) { hideMarkBar(); return; }
+
+  if (style === null) {
+    const n = clearMarks(q.id, markBarRanges);
+    toast(n ? "Marks removed" : "Nothing to remove here");
+  } else {
+    addMarks(q.id, markBarRanges, style);
+    const s = MARK_STYLES.find(x => x.k === style);
+    toast(s ? s.label : "Marked");
+  }
+
+  try {
+    const sel = window.getSelection();
+    if (sel && sel.removeAllRanges) sel.removeAllRanges();
+  } catch (e) { }
+  hideMarkBar();
+  renderDetail();
+}
+
+/* Watch the selection while the detail view is open. */
+function onSelectionChanged() {
+  if (currentView !== "detail") { hideMarkBar(); return; }
+  if (overlayOpen("sheet") || overlayOpen("reportOverlay")) { hideMarkBar(); return; }
+  const ranges = selectionRanges();
+  if (ranges.length) showMarkBar(ranges);
+  else hideMarkBar();
+}
+
+/* ============================================================================
    Reports — content builders and the paginator.
 
    Content is described as a flat list of items; the paginator measures each
@@ -10518,6 +10890,7 @@ const repOpts = {
   chapter: "",
   detail: "notes",      /* notes | full | none */
   photos: true,
+  marks: true,
   closed: true,
   hideNotApplicable: true
 };
@@ -10562,6 +10935,30 @@ function rMeter(t) {
       '<span><i style="background:#9aa8a5"></i>N/A ' + t.na + '</span>' +
       '<span><i style="background:#ffffff"></i>Not started ' + t.todo + '</span>' +
     '</div>';
+}
+
+/* Print blocks as blocks, applying any highlighting. blocksToPlain flattens
+   several blocks into one string, which destroys the character offsets a mark
+   is stored against — so anything that may carry marks has to come through
+   here instead. */
+function reportBlocks(blocks, qid, field, withMarks) {
+  if (typeof blocks === "string") blocks = blocks ? [{ t: "p", x: blocks }] : [];
+  if (!blocks || !blocks.length || typeof blocks.forEach !== "function") return "";
+  let html = "", inList = false;
+  blocks.forEach((b, i) => {
+    const raw = (b && (b.x || b.text)) || (typeof b === "string" ? b : "");
+    if (!raw) return;
+    const body = withMarks ? markupText(raw, qid, field, i) : esc(raw);
+    if (b && b.t === "li") {
+      if (!inList) { html += "<ul>"; inList = true; }
+      html += "<li>" + body + "</li>";
+    } else {
+      if (inList) { html += "</ul>"; inList = false; }
+      html += "<p>" + body + "</p>";
+    }
+  });
+  if (inList) html += "</ul>";
+  return html;
 }
 
 function blocksToPlain(blocks, limit) {
@@ -10752,28 +11149,39 @@ async function chapterItems(ch, opts) {
         '<div class="qmeta">' + stChip(st) +
           (a.owner ? " &nbsp;·&nbsp; " + esc(a.owner) : "") +
           " &nbsp;·&nbsp; " + esc((q.roviq || []).join(", ")) + "</div>" +
-        "<p>" + esc(q.question) + "</p>";
+        "<p>" + (opts.marks ? markupText(q.question, q.id, "question", 0) : esc(q.question)) + "</p>";
 
       if (a.notes) html += '<div class="qnote"><b>Notes.</b> ' + esc(a.notes) + "</div>";
 
-      const eviItems = (q.evidence || []).filter(b => b && b.t === "li");
+      /* the tick index counts only list items, the mark index counts every
+         block — keep both or one of them lands on the wrong line */
+      const eviItems = [];
+      (q.evidence || []).forEach((b, blockIdx) => {
+        if (b && b.t === "li") eviItems.push({ b: b, blockIdx: blockIdx, tickIdx: eviItems.length });
+      });
       if (eviItems.length) {
-        const ticked = eviItems.filter((b, i) => a.evidence && a.evidence[i]).length;
+        const ticked = eviItems.filter(x => a.evidence && a.evidence[x.tickIdx]).length;
         html += "<h4>Expected evidence (" + ticked + " of " + eviItems.length + " confirmed)</h4><ul>" +
-          eviItems.map((b, i) =>
-            "<li>" + ((a.evidence && a.evidence[i]) ? "☑ " : "☐ ") + esc(b.x) + "</li>").join("") +
+          eviItems.map(x =>
+            "<li>" + ((a.evidence && a.evidence[x.tickIdx]) ? "☑ " : "☐ ") +
+            (opts.marks ? markupText(x.b.x, q.id, "evidence", x.blockIdx) : esc(x.b.x)) +
+            "</li>").join("") +
           "</ul>";
       }
 
       if (opts.detail === "full") {
+        const M = opts.marks;
         if (q.objective && q.objective.length)
-          html += "<h4>Objective</h4><p>" + esc(blocksToPlain(q.objective)) + "</p>";
+          html += "<h4>Objective</h4>" + reportBlocks(q.objective, q.id, "objective", M);
+        if (q.guidance && q.guidance.length)
+          html += "<h4>Industry guidance</h4>" + reportBlocks(q.guidance, q.id, "guidance", M);
         if (q.inspection && q.inspection.length)
-          html += "<h4>Inspection guidance</h4><p>" + esc(blocksToPlain(q.inspection, 1400)) + "</p>";
-        const negs = (q.negatives || []).filter(b => b && b.t === "li");
-        if (negs.length)
-          html += "<h4>Potential grounds for a negative observation</h4><ul>" +
-            negs.slice(0, 14).map(b => "<li>" + esc(b.x) + "</li>").join("") + "</ul>";
+          html += "<h4>Inspection guidance</h4>" + reportBlocks(q.inspection, q.id, "inspection", M);
+        if (q.actions && q.actions.length)
+          html += "<h4>Suggested inspector actions</h4>" + reportBlocks(q.actions, q.id, "actions", M);
+        if (q.negatives && q.negatives.length)
+          html += "<h4>Potential grounds for a negative observation</h4>" +
+            reportBlocks(q.negatives, q.id, "negatives", M);
       }
 
       card.innerHTML = html;
@@ -11114,6 +11522,7 @@ function openReportOptions(kind) {
   const needsDetail  = kind === "full" || kind === "chapter";
   const needsPhotos  = kind !== "particulars" && kind !== "attention";
   const needsClosed  = kind === "full" || kind === "findings";
+  const needsMarks   = kind === "full" || kind === "chapter";
 
   openSheet(
     '<h2>' + esc((REPORTS.find(r => r.k === kind) || {}).title || "Report") + '</h2>' +
@@ -11147,13 +11556,22 @@ function openReportOptions(kind) {
         (repOpts.closed ? " checked" : "") + '>' +
         '<span><span class="t">Include closed findings</span></span></label>'
       : "") +
+    (needsMarks
+      ? '<label class="switch"><input type="checkbox" id="roMarks"' +
+        (repOpts.marks ? " checked" : "") + '>' +
+        '<span><span class="t">Show my highlighting</span>' +
+        '<span class="d">Colours and emphasis print as they appear on screen.</span></span></label>'
+      : "") +
     '<div class="row" style="margin-top:14px">' +
       '<button class="btn primary grow" id="roBuild">Build preview</button>' +
       '<button class="btn ghost" id="roCancel">Cancel</button>' +
     '</div>' +
-    (kind === "full"
-      ? '<div class="tiny" style="margin-top:10px">A full report with every question in ' +
-        'detail can run to well over a hundred pages. It may take a few seconds to lay out.</div>'
+    (needsDetail
+      ? '<div class="tiny" style="margin-top:10px">"Full" prints the complete OCIMF ' +
+        'text for every question — objective, industry guidance, inspection guidance, ' +
+        'inspector actions and negative-observation grounds. For the whole library that ' +
+        'runs to several hundred pages and takes a few seconds to lay out. ' +
+        '"Notes and evidence checklist" is the practical choice for a working document.</div>'
       : "")
   );
 
@@ -11164,6 +11582,7 @@ function openReportOptions(kind) {
     if ($("#roDetail"))  repOpts.detail  = $("#roDetail").value;
     if ($("#roPhotos"))  repOpts.photos  = $("#roPhotos").checked;
     if ($("#roClosed"))  repOpts.closed  = $("#roClosed").checked;
+    if ($("#roMarks"))   repOpts.marks   = $("#roMarks").checked;
     repOpts.hideNotApplicable = $("#roHideNA").checked;
     closeSheet();
     await buildAndPreview();
@@ -11242,7 +11661,7 @@ function wireReports() {
    ========================================================================= */
 
 const EXPORT_KIND = "backup";
-const RECORD_MAPS = ["answers", "particulars", "profiles", "findings", "practice"];
+const RECORD_MAPS = ["answers", "particulars", "profiles", "findings", "practice", "annotations"];
 
 function deviceId() {
   let d = null;
@@ -11285,7 +11704,8 @@ async function buildExport(withMedia) {
       particulars: STATE.particulars,
       profiles: STATE.profiles,
       findings: STATE.findings,
-      practice: STATE.practice
+      practice: STATE.practice,
+      annotations: STATE.annotations
     }
   };
 
@@ -12417,7 +12837,14 @@ function wire() {
   $$("[data-sheet-close]").forEach(el => el.onclick = closeSheet);
 
   document.addEventListener("keydown", e => {
-    if (e.key === "Escape") closeSheet();
+    if (e.key === "Escape") { closeSheet(); hideMarkBar(); }
+  });
+
+  /* selectionchange is the only event that fires for both a mouse drag and a
+     touch handle drag, so it is what the markup toolbar listens to */
+  document.addEventListener("selectionchange", () => {
+    clearTimeout(window.__selTimer);
+    window.__selTimer = setTimeout(onSelectionChanged, 180);
   });
 
   window.addEventListener("beforeunload", () => { if (dirty) flush(); });
