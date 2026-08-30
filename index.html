@@ -367,6 +367,38 @@ table.grid tbody tr:nth-child(even) { background:var(--surface2) }
   .mark-bar { display:none !important }
 }
 
+/* follow-up roles + status dropdown */
+.chips.roles { gap:6px }
+.chip.role { font-size:12px; padding:5px 10px }
+.chip.role[aria-pressed="true"] {
+  background:var(--accent); border-color:var(--accent); color:var(--accent-ink);
+}
+.pill.role { background:var(--accent-soft); color:var(--accent); font-weight:700 }
+select.statussel { font-weight:700 }
+select.statussel.st-ready { border-color:var(--ok);   color:var(--ok) }
+select.statussel.st-wip   { border-color:var(--info); color:var(--info) }
+select.statussel.st-gap   { border-color:var(--bad);  color:var(--bad) }
+select.statussel.st-na    { border-color:var(--line-strong); color:var(--muted) }
+#roleList input.role-name { font-size:14px; padding:6px 8px }
+
+/* shortcut editor + report style pickers */
+.sc-sw {
+  width:26px; height:26px; flex:0 0 auto; border-radius:50%;
+  border:2px solid var(--line-strong); display:grid; place-items:center;
+  font-size:12px; font-weight:800; color:var(--text); background:var(--surface2);
+}
+.sc-an-b { font-weight:900 }
+.sc-an-i { font-style:italic; font-family:Georgia,serif }
+.sc-an-u { text-decoration:underline }
+kbd.sc-key {
+  font-family:var(--mono); font-size:12.5px; font-weight:700;
+  background:var(--surface2); border:1px solid var(--line-strong);
+  border-bottom-width:2px; border-radius:6px; padding:4px 8px; white-space:nowrap;
+}
+kbd.sc-key.sc-live { border-color:var(--accent); color:var(--accent) }
+#roStyles .switch { padding:7px 0 }
+#roStyles .switch input { margin-top:4px }
+
 /* attachments */
 .filerow {
   display:flex; gap:10px; align-items:center; padding:9px 0;
@@ -820,6 +852,16 @@ table.rt td.mono { font-family: "Cascadia Mono", Consolas, monospace; white-spac
       <div class="sub">Each inspection keeps its own statuses, notes and particulars.</div>
       <div id="campList"></div>
       <button class="btn sm primary" id="btnNewCampaign">New inspection</button>
+    </div>
+
+    <div class="card">
+      <h2>Follow-up roles</h2>
+      <div id="rolesBox"></div>
+    </div>
+
+    <div class="card">
+      <h2>Keyboard shortcuts</h2>
+      <div id="shortcutBox"></div>
     </div>
 
     <div class="card">
@@ -8452,6 +8494,13 @@ const STATUSES = [
 ];
 const STATUS_LABEL = STATUSES.reduce((o, s) => (o[s.k] = s.label, o), {});
 
+/* Who a question needs chasing with. Editable in Settings, so the list is a
+   setting rather than a constant — these are only the starting point. */
+const DEFAULT_ROLES = [
+  "Office", "Master", "C/O", "2/O", "3/O", "Bosun", "Pumpman",
+  "C/E", "2/E", "C/Ck", "C/Boy", "D/Cdt", "E/Cdt", "D/Rating", "E/Rating"
+];
+
 const THEMES = ["light", "dim", "amoled", "hc"];
 const THEME_LABEL = { light: "Light", dim: "Dim", amoled: "AMOLED", hc: "High contrast" };
 const THEME_BG   = { light: "#ffffff", dim: "#121212", amoled: "#000000", hc: "#000000" };
@@ -8882,6 +8931,61 @@ function applicableQuestions() {
   return QUESTIONS.filter(q => isApplicable(q, excl));
 }
 
+/* ------------------------------------------------------------- roles */
+
+function roles() {
+  if (!STATE.settings) STATE.settings = {};
+  if (!Array.isArray(STATE.settings.roles) || !STATE.settings.roles.length) {
+    STATE.settings.roles = DEFAULT_ROLES.slice();
+  }
+  return STATE.settings.roles;
+}
+
+function setRoles(list) {
+  const clean = [];
+  (list || []).forEach(r => {
+    const t = String(r || "").trim();
+    if (t && clean.indexOf(t) === -1) clean.push(t);
+  });
+  if (!clean.length) return { ok: false, error: "Keep at least one role." };
+  STATE.settings.roles = clean;
+  STATE.settings.modified = nowISO();
+  markDirty();
+  return { ok: true };
+}
+
+function resetRoles() {
+  STATE.settings.roles = DEFAULT_ROLES.slice();
+  STATE.settings.modified = nowISO();
+  markDirty();
+}
+
+/* Roles on a question, including any that have since been removed from the
+   list — deleting a role from Settings must not silently drop assignments. */
+function followUpOf(qid) {
+  const a = getAnswer(qid);
+  return (a && Array.isArray(a.followUp)) ? a.followUp : [];
+}
+
+function toggleFollowUp(qid, role) {
+  const cur = followUpOf(qid).slice();
+  const at = cur.indexOf(role);
+  if (at === -1) cur.push(role); else cur.splice(at, 1);
+  setAnswer(qid, { followUp: cur });
+  return cur;
+}
+
+function rolesInUse() {
+  const seen = {};
+  Object.keys(STATE.answers).forEach(k => {
+    const a = STATE.answers[k];
+    if (a && !a.deleted && a.campaign === STATE.activeCampaign) {
+      (a.followUp || []).forEach(r => { seen[r] = (seen[r] || 0) + 1; });
+    }
+  });
+  return seen;
+}
+
 /* ---------------------------------------------------------- answers */
 
 function answerKey(qid, cid) {
@@ -8905,7 +9009,7 @@ function setAnswer(qid, fields) {
   const key = answerKey(qid, cid);
   const cur = STATE.answers[key] || {
     id: key, campaign: cid, qid: qid,
-    status: "todo", owner: "", notes: "", evidence: {},
+    status: "todo", owner: "", notes: "", evidence: {}, followUp: [],
     created: nowISO(), modified: nowISO(), deleted: false
   };
   Object.assign(cur, fields, { modified: nowISO() });
@@ -9546,9 +9650,14 @@ function clearAllMarks(qid) {
    covering each character, then emit one span per run of identical styles.
    That way a bold word inside a highlight comes out right. */
 function markupText(text, qid, field, block) {
+  return renderMarks(text, qid ? annMarksFor(qid, field, block) : []);
+}
+
+/* Core renderer, given an explicit list of marks. Reports pass a filtered
+   list here so a report can show only, say, the yellow highlights. */
+function renderMarks(text, marks) {
   const src = String(text == null ? "" : text);
-  const marks = qid ? annMarksFor(qid, field, block) : [];
-  if (!marks.length) return esc(src);
+  if (!marks || !marks.length) return esc(src);
 
   const n = src.length;
   const at = new Array(n);
@@ -9660,6 +9769,206 @@ function selectionRanges() {
   return out;
 }
 
+/* ------------------------------------------------------- style labels */
+
+const MARK_LABEL = MARK_STYLES.reduce((o, s) => (o[s.k] = s.label, o), {});
+
+const FIELD_LABEL = {
+  question:   "Question",
+  objective:  "Objective",
+  guidance:   "Industry guidance",
+  inspection: "Inspection guidance",
+  actions:    "Suggested inspector actions",
+  evidence:   "Expected evidence",
+  negatives:  "Potential grounds for a negative observation"
+};
+
+/* The library text a mark was made against. */
+function sourceText(q, field, block) {
+  if (!q) return "";
+  if (field === "question") return q.question || "";
+  const blocks = q[field];
+  if (!Array.isArray(blocks)) return "";
+  const b = blocks[block];
+  return (b && (b.x || b.text)) || "";
+}
+
+/* --------------------------------------------- gathering marked text */
+
+/* Merge overlapping ranges so a passage carrying both a highlight and bold
+   comes out once, not twice. */
+function mergeRanges(list) {
+  const sorted = list.slice().sort((a, b) => a.start - b.start || a.end - b.end);
+  const out = [];
+  sorted.forEach(r => {
+    const last = out[out.length - 1];
+    if (last && r.start <= last.end) last.end = Math.max(last.end, r.end);
+    else out.push({ start: r.start, end: r.end });
+  });
+  return out;
+}
+
+/* Every marked passage matching the chosen styles, grouped by question.
+   styles: array of style keys, or null for all. */
+function collectMarked(styles, chapter) {
+  const wanted = {};
+  (styles && styles.length ? styles : MARK_KEYS).forEach(k => { wanted[k] = true; });
+
+  const results = [];
+  const ann = STATE.annotations || {};
+
+  Object.keys(ann).forEach(qid => {
+    const rec = ann[qid];
+    if (!rec || rec.deleted) return;
+    const q = BYID[qid];
+    if (!q) return;
+    if (chapter && String(q.chapter) !== String(chapter)) return;
+
+    const marks = (rec.marks || []).filter(m => wanted[m.style]);
+    if (!marks.length) return;
+
+    /* group by field, then by block */
+    const byField = {};
+    marks.forEach(m => {
+      const key = m.field + "|" + m.block;
+      (byField[key] = byField[key] || []).push(m);
+    });
+
+    const passages = [];
+    Object.keys(byField).forEach(key => {
+      const parts = key.split("|");
+      const field = parts[0];
+      const block = parseInt(parts[1], 10) || 0;
+      const text = sourceText(q, field, block);
+      if (!text) return;
+
+      const group = byField[key];
+      mergeRanges(group).forEach(span => {
+        const s = Math.max(0, Math.min(text.length, span.start));
+        const e = Math.max(0, Math.min(text.length, span.end));
+        if (e <= s) return;
+        /* shift the marks into the excerpt's own coordinates */
+        const local = group
+          .filter(m => m.start < e && m.end > s)
+          .map(m => ({
+            style: m.style,
+            start: Math.max(0, m.start - s),
+            end: Math.min(e - s, m.end - s)
+          }));
+        passages.push({
+          field: field,
+          fieldLabel: FIELD_LABEL[field] || field,
+          block: block,
+          start: s,
+          end: e,
+          text: text.slice(s, e),
+          html: renderMarks(text.slice(s, e), local),
+          styles: group.filter(m => m.start < e && m.end > s).map(m => m.style)
+        });
+      });
+    });
+
+    if (!passages.length) return;
+
+    const order = ["question", "objective", "guidance", "inspection", "actions", "evidence", "negatives"];
+    passages.sort((a, b) =>
+      order.indexOf(a.field) - order.indexOf(b.field) || a.block - b.block || a.start - b.start);
+
+    results.push({ q: q, passages: passages });
+  });
+
+  results.sort((a, b) => cmpId(a.q.id, b.q.id));
+  return results;
+}
+
+function markedStats(styles, chapter) {
+  const list = collectMarked(styles, chapter);
+  let passages = 0;
+  list.forEach(r => { passages += r.passages.length; });
+  return { questions: list.length, passages: passages };
+}
+
+/* ============================================================ SHORTCUTS */
+
+const SHORTCUT_ACTIONS = MARK_STYLES.map(s => ({ k: s.k, label: s.label, kind: s.kind }))
+  .concat([{ k: "erase", label: "Remove marks", kind: "tool" }]);
+
+const DEFAULT_SHORTCUTS = {
+  "hl-yellow": "Ctrl+1",
+  "hl-green":  "Ctrl+2",
+  "hl-blue":   "Ctrl+3",
+  "hl-pink":   "Ctrl+4",
+  "an-b":      "Ctrl+B",
+  "an-i":      "Ctrl+I",
+  "an-u":      "Ctrl+U",
+  "erase":     "Ctrl+0"
+};
+
+/* A keyboard event as a stable, comparable string. */
+function comboOf(e) {
+  if (!e || !e.key) return "";
+  const key = e.key;
+  if (["Control", "Shift", "Alt", "Meta", "OS"].indexOf(key) !== -1) return "";
+  const parts = [];
+  if (e.ctrlKey || e.metaKey) parts.push("Ctrl");
+  if (e.shiftKey) parts.push("Shift");
+  if (e.altKey) parts.push("Alt");
+  let k = key;
+  if (k === " ") k = "Space";
+  else if (k.length === 1) k = k.toUpperCase();
+  parts.push(k);
+  return parts.join("+");
+}
+
+function shortcuts() {
+  if (!STATE.settings) STATE.settings = {};
+  if (!STATE.settings.shortcuts) {
+    STATE.settings.shortcuts = Object.assign({}, DEFAULT_SHORTCUTS);
+  }
+  return STATE.settings.shortcuts;
+}
+
+function shortcutFor(action) {
+  return shortcuts()[action] || "";
+}
+
+function actionForCombo(combo) {
+  const map = shortcuts();
+  const hit = Object.keys(map).find(a => map[a] && map[a].toLowerCase() === String(combo).toLowerCase());
+  return hit || null;
+}
+
+/* Returns {ok:true} or {ok:false, error, clash} */
+function setShortcut(action, combo) {
+  if (!combo) return { ok: false, error: "No key was pressed." };
+  if (SHORTCUT_ACTIONS.findIndex(a => a.k === action) === -1) {
+    return { ok: false, error: "Unknown action." };
+  }
+  /* a bare letter would fire while reading, so a modifier is required */
+  if (combo.indexOf("Ctrl") === -1 && combo.indexOf("Alt") === -1) {
+    return { ok: false, error: "Use Ctrl or Alt in the combination." };
+  }
+  const clash = actionForCombo(combo);
+  if (clash && clash !== action) {
+    return { ok: false, error: "Already used by " + markActionLabel(clash) + ".", clash: clash };
+  }
+  shortcuts()[action] = combo;
+  STATE.settings.modified = nowISO();
+  markDirty();
+  return { ok: true };
+}
+
+function resetShortcuts() {
+  STATE.settings.shortcuts = Object.assign({}, DEFAULT_SHORTCUTS);
+  STATE.settings.modified = nowISO();
+  markDirty();
+}
+
+function markActionLabel(action) {
+  const a = SHORTCUT_ACTIONS.find(x => x.k === action);
+  return a ? a.label : action;
+}
+
 /* ============================================================================
    Views
    ========================================================================= */
@@ -9731,6 +10040,27 @@ function blocksHTML(blocks, field, qid) {
   });
   if (inList) html += "</ul>";
   return html || '<p class="small">Not stated in the OCIMF library.</p>';
+}
+
+/* The follow-up list stays on screen rather than hiding in a dropdown, since
+   it is the thing you scan when working out who to chase. */
+function followChipsHTML(qid) {
+  const chosen = followUpOf(qid);
+  const list = roles().slice();
+  /* keep assignments whose role has since been removed from the settings list */
+  chosen.forEach(r => { if (list.indexOf(r) === -1) list.push(r); });
+  return list.map(r =>
+    '<button class="chip role" data-role="' + esc(r) + '" aria-pressed="' +
+    (chosen.indexOf(r) !== -1) + '">' + esc(r) + '</button>').join("");
+}
+
+function bindFollowChips(qid) {
+  $$("#dFollow .chip[data-role]").forEach(b => {
+    b.onclick = () => {
+      const now = toggleFollowUp(qid, b.dataset.role);
+      b.setAttribute("aria-pressed", String(now.indexOf(b.dataset.role) !== -1));
+    };
+  });
 }
 
 function meterHTML(t) {
@@ -9916,6 +10246,10 @@ function qRowHTML(q) {
       '<span class="pill ' + st + '">' + STATUS_LABEL[st] + '</span>' +
       (q.roviq || []).slice(0, 2).map(r => '<span class="pill plain">' + esc(r) + '</span>').join("") +
       (a && a.owner ? '<span class="pill tag">' + esc(a.owner) + '</span>' : "") +
+      ((a && a.followUp || []).slice(0, 3).map(r =>
+        '<span class="pill role">' + esc(r) + '</span>').join("")) +
+      (a && (a.followUp || []).length > 3
+        ? '<span class="pill role">+' + ((a.followUp.length - 3)) + '</span>' : "") +
       (a && a.notes ? '<span class="pill plain">note</span>' : "") +
     '</div>' +
   '</button>';
@@ -9990,16 +10324,23 @@ function renderDetail() {
     '</div>' +
 
     '<div class="card">' +
-      '<h2>Status</h2>' +
-      '<div class="statusbar" id="dStatus">' +
-        STATUSES.map(s =>
-          '<button class="' + s.k + '" data-st="' + s.k + '" aria-pressed="' + (s.k === st) + '">' +
-          s.short + '</button>').join("") +
-      '</div>' +
       '<div class="grid2">' +
+        '<div class="field"><label class="fl" for="dStatusSel">Status</label>' +
+          '<select id="dStatusSel" class="statussel st-' + st + '">' +
+            STATUSES.map(s => '<option value="' + s.k + '"' +
+              (s.k === st ? " selected" : "") + '>' + s.label + '</option>').join("") +
+          '</select></div>' +
         '<div class="field"><label class="fl" for="dOwner">Responsible</label>' +
           '<input type="text" id="dOwner" value="' + esc(a.owner || "") + '" placeholder="e.g. C/O, 2/E, Master"></div>' +
       '</div>' +
+
+      '<div class="field" style="margin-bottom:6px">' +
+        '<label class="fl">Follow up with</label>' +
+        '<div class="chips roles" id="dFollow">' +
+          followChipsHTML(q.id) +
+        '</div>' +
+      '</div>' +
+
       '<div class="field"><label class="fl" for="dNotes">Notes</label>' +
         '<textarea id="dNotes" placeholder="What was checked, what is outstanding…">' + esc(a.notes || "") + '</textarea></div>' +
     '</div>' +
@@ -10059,13 +10400,14 @@ function renderDetail() {
     renderDetail();
   };
 
-  $$("#dStatus button").forEach(b => {
-    b.onclick = () => {
-      setAnswer(q.id, { status: b.dataset.st });
-      $$("#dStatus button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
-      toast("Marked " + STATUS_LABEL[b.dataset.st].toLowerCase());
-    };
-  });
+  $("#dStatusSel").onchange = e => {
+    const v = e.target.value;
+    setAnswer(q.id, { status: v });
+    e.target.className = "statussel st-" + v;
+    toast("Marked " + STATUS_LABEL[v].toLowerCase());
+  };
+
+  bindFollowChips(q.id);
 
   $("#dOwner").oninput = e => setAnswer(q.id, { owner: e.target.value });
   $("#dNotes").oninput = e => setAnswer(q.id, { notes: e.target.value });
@@ -10236,6 +10578,8 @@ function renderSettings() {
   $("#btnNewCampaign").onclick = () => openCampaignSheet(null);
 
   renderSync();
+  renderRoles();
+  renderShortcuts();
   renderDesktop();
   renderPWA();
   renderStorage();
@@ -10882,7 +11226,9 @@ const REPORTS = [
   { k: "chapter",     title: "Chapter report",           desc: "One chapter in full, question by question." },
   { k: "attention",   title: "Gap & attention report",   desc: "Only what is not ready — gaps first, then work in progress." },
   { k: "findings",    title: "Findings register",        desc: "Every finding with detail, close-out and photographs." },
-  { k: "particulars", title: "Vessel particulars sheet", desc: "Chapter 1 particulars as a single reference sheet." }
+  { k: "particulars", title: "Vessel particulars sheet", desc: "Chapter 1 particulars as a single reference sheet." },
+  { k: "marks",       title: "Highlights & marked text",  desc: "Only the passages you have marked, filtered by colour or emphasis." },
+  { k: "followup",    title: "Follow-up by role",          desc: "A separate section for each person, listing what they need to close out." }
 ];
 
 const repOpts = {
@@ -10891,6 +11237,9 @@ const repOpts = {
   detail: "notes",      /* notes | full | none */
   photos: true,
   marks: true,
+  markStyles: null,        /* null = every style */
+  followRoles: null,       /* null = every role  */
+  followUnassigned: true,
   closed: true,
   hideNotApplicable: true
 };
@@ -11344,6 +11693,142 @@ function particularsItems() {
   return items;
 }
 
+function markedItems(opts) {
+  const items = [];
+  const styles = opts.markStyles && opts.markStyles.length ? opts.markStyles : MARK_KEYS;
+  const chapter = opts.chapter && opts.kind === "marks" ? opts.chapter : "";
+  const groups = collectMarked(styles, chapter);
+  const stats = { questions: groups.length, passages: 0 };
+  groups.forEach(g => { stats.passages += g.passages.length; });
+
+  const chosen = MARK_STYLES.filter(s => styles.indexOf(s.k) !== -1);
+  const head = el("div");
+  head.innerHTML =
+    "<h2>Highlights and marked text</h2>" +
+    '<p class="lead">' + stats.passages + " marked passage" + (stats.passages === 1 ? "" : "s") +
+    " across " + stats.questions + " question" + (stats.questions === 1 ? "" : "s") + ".</p>" +
+    '<table class="kv">' +
+      "<tr><th>Marks included</th><td>" +
+        chosen.map(s => s.kind === "highlight"
+          ? '<span class="' + s.k + '">' + esc(s.label) + " highlight</span>"
+          : '<span class="' + s.k + '">' + esc(s.label) + "</span>").join(" &nbsp; ") +
+      "</td></tr>" +
+      (chapter ? "<tr><th>Chapter</th><td>" + esc(chapter) + ". " +
+        esc(LIB.chapterTitles[String(chapter)] || "") + "</td></tr>" : "") +
+    "</table>";
+  items.push({ type: "el", node: head, newPage: true });
+
+  if (!groups.length) {
+    items.push({ type: "el", node: el("p", "muted",
+      "Nothing has been marked with the chosen styles yet.") });
+    return items;
+  }
+
+  let lastChapter = null;
+  groups.forEach(g => {
+    const q = g.q;
+    if (q.chapter !== lastChapter) {
+      lastChapter = q.chapter;
+      const ch = el("div");
+      ch.innerHTML = "<h2>Chapter " + q.chapter + " — " +
+        esc(LIB.chapterTitles[String(q.chapter)] || "") + "</h2>";
+      items.push({ type: "el", node: ch, newPage: true });
+    }
+
+    const st = answerStatus(q.id);
+    const card = el("div", "qcard " + st);
+    card.innerHTML =
+      '<div class="qid">' + esc(q.id) + "</div>" +
+      '<div class="qh">' + esc(q.short) + "</div>" +
+      '<div class="qmeta">' + stChip(st) + " &nbsp;·&nbsp; " + esc(q.sectionTitle) + "</div>" +
+      g.passages.map(p =>
+        '<h4 style="margin:3mm 0 1.5mm">' + esc(p.fieldLabel) + "</h4>" +
+        '<p style="margin:0 0 2mm">' + p.html + "</p>").join("");
+    items.push({ type: "el", node: card });
+  });
+
+  return items;
+}
+
+/* Each role gets its own pages, so a section can be torn off and handed over. */
+function followUpItems(opts) {
+  const items = [];
+  const apps = applicableQuestions();
+  const chosen = opts.followRoles && opts.followRoles.length ? opts.followRoles : roles();
+
+  const byRole = {};
+  chosen.forEach(r => { byRole[r] = []; });
+  const unassigned = [];
+
+  apps.forEach(q => {
+    if (opts.hideNotApplicable && answerStatus(q.id) === "na") return;
+    const list = followUpOf(q.id);
+    if (!list.length) { unassigned.push(q); return; }
+    list.forEach(r => { if (byRole[r]) byRole[r].push(q); });
+  });
+
+  const active = chosen.filter(r => byRole[r].length);
+
+  const head = el("div");
+  head.innerHTML =
+    "<h2>Follow-up by role</h2>" +
+    '<p class="lead">Who needs to close out what, before the inspection.</p>' +
+    '<table class="rt"><thead><tr><th>Follow up with</th><th>Items</th>' +
+    "<th>Ready</th><th>Gap</th><th>Outstanding</th></tr></thead><tbody>" +
+    active.map(r => {
+      const t = tally(byRole[r]);
+      return "<tr><td><b>" + esc(r) + "</b></td>" +
+        '<td class="num">' + t.total + "</td>" +
+        '<td class="num">' + t.ready + "</td>" +
+        '<td class="num">' + t.gap + "</td>" +
+        '<td class="num">' + (t.total - t.ready - t.na) + "</td></tr>";
+    }).join("") +
+    (opts.followUnassigned && unassigned.length
+      ? '<tr><td><i>Not yet assigned</i></td><td class="num">' + unassigned.length +
+        '</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>'
+      : "") +
+    "</tbody></table>";
+  items.push({ type: "el", node: head, newPage: true });
+
+  if (!active.length && !(opts.followUnassigned && unassigned.length)) {
+    items.push({ type: "el", node: el("p", "muted",
+      "No questions have been assigned for follow-up yet.") });
+    return items;
+  }
+
+  const section = (title, list, note) => {
+    const h = el("div");
+    const t = tally(list);
+    h.innerHTML = "<h2>" + esc(title) + "</h2>" +
+      '<p class="lead">' + list.length + " question" + (list.length === 1 ? "" : "s") +
+      " · " + t.ready + " ready · " + t.gap + " gap" + (t.gap === 1 ? "" : "s") +
+      " · " + t.wip + " in progress · " + t.todo + " not started.</p>" +
+      (note ? '<p class="muted">' + esc(note) + "</p>" : "") + rMeter(t);
+    items.push({ type: "el", node: h, newPage: true });
+
+    items.push({
+      type: "table",
+      head: "<tr><th>Question</th><th>Subject</th><th>Status</th><th>Also with</th><th>Notes</th></tr>",
+      rows: list.map(q => {
+        const a = getAnswer(q.id) || {};
+        const others = followUpOf(q.id).filter(r => r !== title);
+        return '<td class="mono">' + esc(q.id) + "</td>" +
+               "<td>" + esc(q.short) + "</td>" +
+               "<td>" + stChip(answerStatus(q.id)) + "</td>" +
+               "<td>" + (others.length ? esc(others.join(", ")) : "—") + "</td>" +
+               "<td>" + esc(a.notes || "—") + "</td>";
+      })
+    });
+  };
+
+  active.forEach(r => section(r, byRole[r]));
+  if (opts.followUnassigned && unassigned.length) {
+    section("Not yet assigned", unassigned,
+      "Nobody has been named for these questions yet.");
+  }
+  return items;
+}
+
 /* ============================================================== assemble */
 
 async function buildReportItems(opts) {
@@ -11369,6 +11854,10 @@ async function buildReportItems(opts) {
     items = items.concat(await findingItems(opts));
   } else if (opts.kind === "particulars") {
     items = items.concat(particularsItems());
+  } else if (opts.kind === "marks") {
+    items = items.concat(markedItems(opts));
+  } else if (opts.kind === "followup") {
+    items = items.concat(followUpItems(opts));
   }
   return { items: items, meta: meta };
 }
@@ -11519,6 +12008,8 @@ function renderReports() {
 function openReportOptions(kind) {
   repOpts.kind = kind;
   const needsChapter = kind === "chapter";
+  const isMarks = kind === "marks";
+  const isFollow = kind === "followup";
   const needsDetail  = kind === "full" || kind === "chapter";
   const needsPhotos  = kind !== "particulars" && kind !== "attention";
   const needsClosed  = kind === "full" || kind === "findings";
@@ -11526,6 +12017,54 @@ function openReportOptions(kind) {
 
   openSheet(
     '<h2>' + esc((REPORTS.find(r => r.k === kind) || {}).title || "Report") + '</h2>' +
+    (isMarks
+      ? '<div class="field"><label class="fl">Which marks to include</label>' +
+        '<div id="roStyles">' +
+          MARK_STYLES.map(st => {
+            const on = !repOpts.markStyles || repOpts.markStyles.indexOf(st.k) !== -1;
+            const chip = st.swatch
+              ? '<span class="sc-sw" style="background:' + st.swatch + '"></span>'
+              : '<span class="sc-sw sc-' + st.k + '">' +
+                (st.k === "an-b" ? "B" : st.k === "an-i" ? "I" : "U") + "</span>";
+            return '<label class="switch">' +
+              '<input type="checkbox" data-style="' + st.k + '"' + (on ? " checked" : "") + ">" +
+              chip +
+              '<span><span class="t">' + esc(st.label) +
+              (st.kind === "highlight" ? " highlight" : "") + "</span></span></label>";
+          }).join("") +
+        "</div>" +
+        '<div class="row" style="margin-top:8px">' +
+          '<button class="btn sm ghost" id="roAll">All</button>' +
+          '<button class="btn sm ghost" id="roNone">None</button>' +
+          '<button class="btn sm ghost" id="roHl">Highlights only</button>' +
+        "</div>" +
+        '<div class="tiny" id="roCount" style="margin-top:8px">—</div>' +
+        "</div>" +
+        '<div class="field"><label class="fl" for="roChapter">Chapter</label>' +
+        '<select id="roChapter"><option value="">Every chapter</option>' +
+          chapterStats().map(c =>
+            '<option value="' + c.chapter + '">' + c.chapter + ". " + esc(c.title) + "</option>").join("") +
+        "</select></div>"
+      : "") +
+    (isFollow
+      ? '<div class="field"><label class="fl">Include which roles</label>' +
+        '<div class="chips roles" id="roRoles">' +
+          roles().map(r => {
+            const on = !repOpts.followRoles || repOpts.followRoles.indexOf(r) !== -1;
+            return '<button class="chip role" data-role="' + esc(r) + '" aria-pressed="' +
+              on + '">' + esc(r) + "</button>";
+          }).join("") +
+        "</div>" +
+        '<div class="row" style="margin-top:8px">' +
+          '<button class="btn sm ghost" id="roRolesAll">All</button>' +
+          '<button class="btn sm ghost" id="roRolesUsed">Only those in use</button>' +
+          '<button class="btn sm ghost" id="roRolesNone">None</button>' +
+        "</div></div>" +
+        '<label class="switch"><input type="checkbox" id="roUnassigned"' +
+          (repOpts.followUnassigned ? " checked" : "") + ">" +
+          '<span><span class="t">Include a section for unassigned questions</span>' +
+          '<span class="d">Everything nobody has been named for yet.</span></span></label>'
+      : "") +
     (needsChapter
       ? '<div class="field"><label class="fl" for="roChapter">Chapter</label>' +
         '<select id="roChapter">' +
@@ -11577,12 +12116,74 @@ function openReportOptions(kind) {
 
   $("#roCancel").onclick = closeSheet;
   $("#sheet .scrim").onclick = closeSheet;
+
+  if (isFollow) {
+    const used = rolesInUse();
+    const setAll = on => {
+      $$("#roRoles .chip").forEach(c => c.setAttribute("aria-pressed", String(on)));
+    };
+    $$("#roRoles .chip").forEach(c => {
+      c.onclick = () => c.setAttribute("aria-pressed",
+        c.getAttribute("aria-pressed") === "true" ? "false" : "true");
+    });
+    $("#roRolesAll").onclick = () => setAll(true);
+    $("#roRolesNone").onclick = () => setAll(false);
+    $("#roRolesUsed").onclick = () => {
+      $$("#roRoles .chip").forEach(c =>
+        c.setAttribute("aria-pressed", String(!!used[c.dataset.role])));
+    };
+  }
+
+  if (isMarks) {
+    const chosen = () => $$("#roStyles input[data-style]")
+      .filter(x => x.checked).map(x => x.dataset.style);
+    const refresh = () => {
+      const list = chosen();
+      const ch = $("#roChapter") ? $("#roChapter").value : "";
+      const s2 = markedStats(list, ch);
+      $("#roCount").textContent = list.length
+        ? s2.passages + " passage" + (s2.passages === 1 ? "" : "s") + " across " +
+          s2.questions + " question" + (s2.questions === 1 ? "" : "s")
+        : "Choose at least one kind of mark.";
+      $("#roBuild").disabled = !list.length || !s2.passages;
+    };
+    $$("#roStyles input[data-style]").forEach(x => { x.onchange = refresh; });
+    if ($("#roChapter")) $("#roChapter").onchange = refresh;
+    $("#roAll").onclick = () => { $$("#roStyles input").forEach(x => { x.checked = true; }); refresh(); };
+    $("#roNone").onclick = () => { $$("#roStyles input").forEach(x => { x.checked = false; }); refresh(); };
+    $("#roHl").onclick = () => {
+      $$("#roStyles input").forEach(x => { x.checked = HIGHLIGHT_KEYS.indexOf(x.dataset.style) !== -1; });
+      refresh();
+    };
+    refresh();
+  }
   $("#roBuild").onclick = async () => {
     if ($("#roChapter")) repOpts.chapter = $("#roChapter").value;
     if ($("#roDetail"))  repOpts.detail  = $("#roDetail").value;
     if ($("#roPhotos"))  repOpts.photos  = $("#roPhotos").checked;
     if ($("#roClosed"))  repOpts.closed  = $("#roClosed").checked;
     if ($("#roMarks"))   repOpts.marks   = $("#roMarks").checked;
+    if (isFollow) {
+    const used = rolesInUse();
+    const setAll = on => {
+      $$("#roRoles .chip").forEach(c => c.setAttribute("aria-pressed", String(on)));
+    };
+    $$("#roRoles .chip").forEach(c => {
+      c.onclick = () => c.setAttribute("aria-pressed",
+        c.getAttribute("aria-pressed") === "true" ? "false" : "true");
+    });
+    $("#roRolesAll").onclick = () => setAll(true);
+    $("#roRolesNone").onclick = () => setAll(false);
+    $("#roRolesUsed").onclick = () => {
+      $$("#roRoles .chip").forEach(c =>
+        c.setAttribute("aria-pressed", String(!!used[c.dataset.role])));
+    };
+  }
+
+  if (isMarks) {
+      repOpts.markStyles = $$("#roStyles input[data-style]")
+        .filter(x => x.checked).map(x => x.dataset.style);
+    }
     repOpts.hideNotApplicable = $("#roHideNA").checked;
     closeSheet();
     await buildAndPreview();
@@ -11705,7 +12306,8 @@ async function buildExport(withMedia) {
       profiles: STATE.profiles,
       findings: STATE.findings,
       practice: STATE.practice,
-      annotations: STATE.annotations
+      annotations: STATE.annotations,
+      settings: STATE.settings
     }
   };
 
@@ -11825,6 +12427,25 @@ async function mergeImport(payload) {
     STATE[m] = STATE[m] || {};
     mergeMap(STATE[m], d[m], stats);
   });
+
+  /* Preferences are a single object rather than a keyed map, so they merge on
+     their own timestamp. The theme is deliberately left out — it belongs to
+     the device, not the data. */
+  const SHARED_PREFS = ["shortcuts", "roles"];
+  if (d.settings) {
+    const mine = STATE.settings || (STATE.settings = {});
+    const theirsNewer = String(d.settings.modified || "") > String(mine.modified || "");
+    SHARED_PREFS.forEach(k => {
+      if (!d.settings[k]) return;
+      if (!mine[k] || theirsNewer) {
+        mine[k] = Array.isArray(d.settings[k])
+          ? d.settings[k].slice()
+          : Object.assign({}, d.settings[k]);
+        stats.updated++;
+      }
+    });
+    if (theirsNewer) mine.modified = d.settings.modified;
+  }
 
   if (payload.media) {
     for (const id of Object.keys(payload.media)) {
@@ -12342,6 +12963,199 @@ async function renderDesktop() {
 }
 
 /* ============================================================================
+   Keyboard shortcuts — running them, and editing them in Settings
+   ========================================================================= */
+
+let capturingFor = null;      /* action being rebound, or null */
+
+function isTypingTarget(el) {
+  if (!el || !el.tagName) return false;
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return true;
+  return el.isContentEditable === true;
+}
+
+/* Apply a mark action to whatever is selected. Returns true if it did. */
+function runMarkAction(action) {
+  if (currentView !== "detail") return false;
+  const q = BYID[detailQid];
+  if (!q) return false;
+  const ranges = selectionRanges();
+  if (!ranges.length) return false;
+
+  if (action === "erase") {
+    const n = clearMarks(q.id, ranges);
+    toast(n ? "Marks removed" : "Nothing to remove here");
+  } else {
+    addMarks(q.id, ranges, action);
+    toast(markActionLabel(action));
+  }
+  try {
+    const sel = window.getSelection();
+    if (sel && sel.removeAllRanges) sel.removeAllRanges();
+  } catch (e) { }
+  hideMarkBar();
+  renderDetail();
+  return true;
+}
+
+function onShortcutKey(e) {
+  /* the rebinding field swallows everything while it is open */
+  if (capturingFor) {
+    e.preventDefault();
+    const combo = comboOf(e);
+    if (!combo) return;
+    finishCapture(combo);
+    return;
+  }
+  if (isTypingTarget(e.target)) return;
+
+  const combo = comboOf(e);
+  if (!combo) return;
+  const action = actionForCombo(combo);
+  if (!action) return;
+
+  /* Ctrl+B and friends are browser shortcuts too — only take them when there
+     is actually a selection in the library to mark. */
+  if (runMarkAction(action)) e.preventDefault();
+}
+
+/* ------------------------------------------------------------ editor */
+
+function renderShortcuts() {
+  const box = $("#shortcutBox");
+  if (!box) return;
+
+  box.innerHTML =
+    '<div class="sub">Select text in the library, then press a combination. ' +
+    'Shortcuts only fire while text is selected, so they never get in the way of reading.</div>' +
+    '<div id="scList">' +
+      SHORTCUT_ACTIONS.map(a => {
+        const sw = MARK_STYLES.find(s => s.k === a.k);
+        const chip = sw && sw.swatch
+          ? '<span class="sc-sw" style="background:' + sw.swatch + '"></span>'
+          : '<span class="sc-sw sc-' + esc(a.k) + '">' +
+            (a.k === "an-b" ? "B" : a.k === "an-i" ? "I" : a.k === "an-u" ? "U" : "✕") + "</span>";
+        return '<div class="filerow">' + chip +
+          '<span class="grow"><span class="fn">' + esc(a.label) + "</span></span>" +
+          '<kbd class="sc-key" data-key="' + esc(a.k) + '">' +
+            esc(shortcutFor(a.k) || "not set") + "</kbd>" +
+          '<button class="btn sm" data-bind="' + esc(a.k) + '">Change</button>' +
+        "</div>";
+      }).join("") +
+    "</div>" +
+    '<button class="btn sm ghost block" id="scReset" style="margin-top:11px">Restore defaults</button>';
+
+  $$("#scList [data-bind]").forEach(b => { b.onclick = () => beginCapture(b.dataset.bind); });
+  $("#scReset").onclick = () => {
+    resetShortcuts();
+    toast("Shortcuts restored");
+    renderShortcuts();
+  };
+}
+
+function beginCapture(action) {
+  capturingFor = action;
+  const kbd = $('#scList .sc-key[data-key="' + action + '"]');
+  if (kbd) { kbd.textContent = "press keys…"; kbd.classList.add("sc-live"); }
+  toast("Press the combination, or Escape to cancel");
+}
+
+function finishCapture(combo) {
+  const action = capturingFor;
+  capturingFor = null;
+  if (!action) return;
+
+  if (combo === "Escape") { renderShortcuts(); return; }
+
+  const r = setShortcut(action, combo);
+  if (!r.ok) toast(r.error);
+  else toast(markActionLabel(action) + " → " + combo);
+  renderShortcuts();
+}
+
+/* ============================================================================
+   Follow-up roles editor
+   ========================================================================= */
+
+function renderRoles() {
+  const box = $("#rolesBox");
+  if (!box) return;
+  const list = roles();
+  const used = rolesInUse();
+
+  box.innerHTML =
+    '<div class="sub">These appear on every question under “Follow up with”. ' +
+    'Rename or reorder them to match how your ship is run.</div>' +
+    '<div id="roleList">' +
+      list.map((r, i) =>
+        '<div class="filerow" data-row="' + i + '">' +
+          '<span class="grow"><input type="text" class="role-name" data-i="' + i +
+            '" value="' + esc(r) + '" aria-label="Role name"></span>' +
+          (used[r] ? '<span class="pill role">' + used[r] + "</span>" : "") +
+          '<button class="btn sm ghost" data-up="' + i + '" title="Move up"' +
+            (i === 0 ? " disabled" : "") + ">↑</button>" +
+          '<button class="btn sm ghost" data-down="' + i + '" title="Move down"' +
+            (i === list.length - 1 ? " disabled" : "") + ">↓</button>" +
+          '<button class="btn sm ghost" data-del="' + i + '" title="Remove">✕</button>' +
+        "</div>").join("") +
+    "</div>" +
+    '<div class="row" style="margin-top:10px">' +
+      '<input type="text" id="roleNew" placeholder="Add a role, e.g. 3/E" class="grow">' +
+      '<button class="btn sm primary" id="roleAdd">Add</button>' +
+    "</div>" +
+    '<button class="btn sm ghost block" id="roleReset" style="margin-top:9px">Restore the standard list</button>';
+
+  const save = next => {
+    const r = setRoles(next);
+    if (!r.ok) { toast(r.error); return; }
+    renderRoles();
+    if (currentView === "detail") renderDetail();
+  };
+
+  $$("#roleList .role-name").forEach(inp => {
+    inp.onchange = () => {
+      const next = roles().slice();
+      next[+inp.dataset.i] = inp.value.trim() || next[+inp.dataset.i];
+      save(next);
+    };
+  });
+
+  $$("#roleList [data-up]").forEach(b => b.onclick = () => {
+    const i = +b.dataset.up, next = roles().slice();
+    if (i > 0) { const t = next[i - 1]; next[i - 1] = next[i]; next[i] = t; save(next); }
+  });
+  $$("#roleList [data-down]").forEach(b => b.onclick = () => {
+    const i = +b.dataset.down, next = roles().slice();
+    if (i < next.length - 1) { const t = next[i + 1]; next[i + 1] = next[i]; next[i] = t; save(next); }
+  });
+  $$("#roleList [data-del]").forEach(b => b.onclick = () => {
+    const i = +b.dataset.del, next = roles().slice();
+    const name = next[i];
+    if (used[name] && !confirm(name + " is set on " + used[name] +
+        " question(s). Remove it from the list? Those questions keep the entry.")) return;
+    next.splice(i, 1);
+    save(next);
+  });
+
+  const add = () => {
+    const v = $("#roleNew").value.trim();
+    if (!v) return;
+    if (roles().indexOf(v) !== -1) { toast(v + " is already on the list"); return; }
+    save(roles().concat([v]));
+    toast(v + " added");
+  };
+  $("#roleAdd").onclick = add;
+  $("#roleNew").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); add(); } };
+
+  $("#roleReset").onclick = () => {
+    if (!confirm("Restore the standard list of roles?")) return;
+    resetRoles();
+    renderRoles();
+    toast("Roles restored");
+  };
+}
+
+/* ============================================================================
    PWA layer.
 
    Only active when the file is served over http(s). Under the desktop shell
@@ -12836,8 +13650,9 @@ function wire() {
   $("#btnCampaign").onclick = () => show("settings");
   $$("[data-sheet-close]").forEach(el => el.onclick = closeSheet);
 
+  document.addEventListener("keydown", onShortcutKey);
   document.addEventListener("keydown", e => {
-    if (e.key === "Escape") { closeSheet(); hideMarkBar(); }
+    if (e.key === "Escape" && !capturingFor) { closeSheet(); hideMarkBar(); }
   });
 
   /* selectionchange is the only event that fires for both a mouse drag and a

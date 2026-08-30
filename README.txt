@@ -34,6 +34,20 @@ The back gesture moves through the app rather than leaving it:
   * on the dashboard it asks once, and a second press within two
     seconds closes the app
 
+Keyboard shortcuts
+------------------
+With a keyboard attached, select text in the library and press Ctrl+1
+to Ctrl+4 for highlights, Ctrl+B / Ctrl+I / Ctrl+U for emphasis, and
+Ctrl+0 to remove marks. They can be reassigned under Settings.
+
+Follow-up roles
+---------------
+Every question carries a "Follow up with" list - Office, Master, C/O and
+so on - which can be set to several people at once. Edit, reorder or add
+to that list under Settings; removing a role there never clears it from
+questions it is already set on. The "Follow-up by role" report prints a
+separate section per person.
+
 Notes
 -----
   * The manifest deliberately uses the .json extension. GitHub Pages
