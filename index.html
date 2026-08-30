@@ -11,9 +11,12 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="manifest" id="manifestLink">
 <script>
-/* Apply the stored theme before first paint so AMOLED never flashes white. */
+/* Apply the stored theme and text size before first paint, so AMOLED never
+   flashes white and the text does not visibly jump size on load. */
 (function () {
   try {
+    var ts = parseFloat(localStorage.getItem('sire2.textScale'));
+    if (ts && ts >= 1 && ts <= 2) document.documentElement.style.setProperty('--tscale', String(ts));
     var t = localStorage.getItem('sire2.theme') || 'light';
     document.documentElement.dataset.theme = t;
     var c = { light: '#ffffff', dim: '#121212', amoled: '#000000', hc: '#000000' }[t] || '#ffffff';
@@ -367,6 +370,62 @@ table.grid tbody tr:nth-child(even) { background:var(--surface2) }
   .mark-bar { display:none !important }
 }
 
+/* search hits + publications */
+.qrow .snip {
+  margin-top:6px; font-size:12.5px; line-height:1.5; color:var(--muted);
+  border-left:2px solid var(--line-strong); padding-left:8px;
+}
+.qrow .snip-f {
+  font-size:10.5px; font-weight:800; letter-spacing:.4px; text-transform:uppercase;
+  color:var(--accent); margin-right:5px;
+}
+mark.hit { background:var(--accent-soft); color:var(--accent); font-weight:700; border-radius:2px }
+.linkx {
+  background:none; border:0; color:inherit; cursor:pointer; font-weight:800;
+  padding:0 0 0 5px; font-size:12px;
+}
+.linkish {
+  background:none; border:0; padding:0; text-align:left; color:var(--accent);
+  cursor:pointer; font:inherit; text-decoration:underline; text-underline-offset:2px;
+}
+.pubrow .pubname { font-size:14px; font-weight:650; overflow-wrap:anywhere }
+
+/* ROVIQ walk grouping + bulk selection */
+.leghead {
+  margin:18px 2px 4px; font-size:11.5px; font-weight:800; letter-spacing:1.2px;
+  text-transform:uppercase; color:var(--accent);
+}
+.sechead .grp-meter {
+  display:inline-flex; width:52px; height:6px; border-radius:999px;
+  background:var(--surface2); overflow:hidden; margin-left:8px; vertical-align:middle;
+}
+.sechead .grp-meter i { display:block; height:100% }
+.sechead .grp-meter i.ready { background:var(--ok) }
+.sechead .grp-meter i.gap { background:var(--bad) }
+.sechead .grp-n { font-size:11px; margin-left:6px; color:var(--muted); font-weight:700 }
+
+.qrow.picking { padding-left:40px; position:relative }
+.qrow .tick {
+  position:absolute; left:11px; top:50%; transform:translateY(-50%);
+  width:20px; height:20px; border-radius:5px; border:2px solid var(--line-strong);
+  display:grid; place-items:center; font-size:13px; font-weight:900; color:var(--accent-ink);
+}
+.qrow.picked { border-color:var(--accent); background:var(--accent-soft) }
+.qrow.picked .tick { background:var(--accent); border-color:var(--accent) }
+
+.bulk-bar {
+  position:fixed; left:50%; transform:translateX(-50%) translateY(10px);
+  bottom:calc(84px + env(safe-area-inset-bottom));
+  z-index:60; opacity:0; pointer-events:none; transition:opacity .14s, transform .14s;
+  background:var(--surface); border:1px solid var(--line-strong);
+  border-radius:14px; box-shadow:var(--shadow-lg); padding:8px 10px;
+  max-width:calc(100vw - 20px);
+}
+.bulk-bar.on { opacity:1; pointer-events:auto; transform:translateX(-50%) translateY(0) }
+.bulk-inner { display:flex; align-items:center; gap:7px; flex-wrap:wrap; justify-content:center }
+.bulk-n { font-size:13px; font-weight:800; color:var(--accent) }
+.chip.role.bk-some { border-style:dashed; border-color:var(--accent); color:var(--accent) }
+
 /* follow-up roles + status dropdown */
 .chips.roles { gap:6px }
 .chip.role { font-size:12px; padding:5px 10px }
@@ -427,6 +486,42 @@ kbd.sc-key.sc-live { border-color:var(--accent); color:var(--accent) }
 @media (min-width:720px) {
   .sheet .panel { left:50%; transform:translateX(-50%); width:640px; border-radius:var(--r-lg); bottom:5vh; max-height:82vh }
 }
+
+/* ======================================================== TEXT SIZE ==== */
+/* Scales the text you actually read on deck, leaving chrome and controls
+   alone so the layout does not fall apart at the largest setting. */
+:root { --tscale: 1 }
+
+body { font-size: calc(16px * var(--tscale)) }
+
+.blk p, .blk li            { font-size: calc(15px * var(--tscale)) }
+.card p, .card li          { font-size: calc(15px * var(--tscale)) }
+#detailBody h1             { font-size: calc(21px * var(--tscale)) }
+#detailBody p              { font-size: calc(15.5px * var(--tscale)) }
+.qrow .t                   { font-size: calc(14.5px * var(--tscale)) }
+.qrow .snip                { font-size: calc(12.5px * var(--tscale)) }
+.evi span                  { font-size: calc(14.5px * var(--tscale)) }
+.small                     { font-size: calc(13.5px * var(--tscale)) }
+.sub                       { font-size: calc(12.5px * var(--tscale)) }
+textarea, input[type=text] { font-size: calc(15px * var(--tscale)) }
+#prCard .blk p, #prCard .blk li { font-size: calc(15px * var(--tscale)) }
+.pubrow .pubname           { font-size: calc(14px * var(--tscale)) }
+
+/* the printed report has its own typography and must not follow the screen */
+.page, .page * { --tscale: 1 }
+
+/* ======================================================== SPARKLINE ==== */
+.spark { display:block; width:100%; height:64px; margin:6px 0 2px }
+.count-days { font-size:34px; font-weight:800; line-height:1; letter-spacing:-1px }
+.count-sub { font-size:12.5px; color:var(--muted); margin-top:3px }
+.verdict { border-radius:var(--r-sm); padding:9px 11px; font-size:13.5px; margin-top:10px }
+.verdict.ontrack { background:var(--ok-soft); color:var(--ok) }
+.verdict.behind  { background:var(--bad-soft); color:var(--bad) }
+.verdict.unknown { background:var(--surface2); color:var(--muted) }
+.verdict.done    { background:var(--ok-soft); color:var(--ok) }
+.tsize-row { display:flex; gap:8px; align-items:center }
+.tsize-demo { flex:1 1 auto; font-size:calc(15px * var(--tscale)); color:var(--muted) }
+
 /* ============================================================================
    REPORTS — real A4 pages. Each page carries its own decorative frame,
    running header, footer and page number, so the output is identical in
@@ -693,6 +788,7 @@ table.rt td.mono { font-family: "Cascadia Mono", Consolas, monospace; white-spac
       </div>
     </div>
 
+    <div id="dashProgress"></div>
     <div id="dashExtra"></div>
 
     <div class="card">
@@ -717,7 +813,7 @@ table.rt td.mono { font-family: "Cascadia Mono", Consolas, monospace; white-spac
   <section class="view hidden" id="v-library">
     <div class="card">
       <div class="field" style="margin-bottom:8px">
-        <input type="text" id="fText" placeholder="Search question, short text or id…" autocomplete="off">
+        <input type="text" id="fText" placeholder="Search anything — try &quot;enclosed space&quot;" autocomplete="off">
       </div>
       <div class="filters">
         <select id="fChapter"></select>
@@ -725,8 +821,15 @@ table.rt td.mono { font-family: "Cascadia Mono", Consolas, monospace; white-spac
         <select id="fRoviq"></select>
         <select id="fStatus"></select>
       </div>
+      <div id="fActive"></div>
+      <div class="chips" id="fGroup">
+        <button class="chip" data-group="chapter" aria-pressed="true">By chapter</button>
+        <button class="chip" data-group="walk">ROVIQ walk</button>
+      </div>
       <div class="chips">
+        <button class="chip" id="fFullText" aria-pressed="true">Search all text</button>
         <button class="chip" id="fApplicable" aria-pressed="true">Applicable only</button>
+        <button class="chip" id="fSelect" aria-pressed="false">Select</button>
         <button class="chip" id="fClear">Clear filters</button>
       </div>
       <div class="small" id="fCount" style="margin-top:9px">—</div>
@@ -836,6 +939,22 @@ table.rt td.mono { font-family: "Cascadia Mono", Consolas, monospace; white-spac
     </div>
   </section>
 
+  <!-- ================================================= PUBLICATIONS ==== -->
+  <section class="view hidden" id="v-publications">
+    <div class="card">
+      <h2>Publications</h2>
+      <div class="sub">Every publication the library refers to, and how many questions rest on it. Useful when gathering paperwork before an inspection.</div>
+      <div id="pubHead"></div>
+      <div class="field" style="margin:12px 0 0">
+        <input type="text" id="pubSearch" placeholder="Filter publications…" autocomplete="off">
+      </div>
+      <div class="chips">
+        <button class="chip" id="pubApplicable" aria-pressed="true">This vessel only</button>
+      </div>
+    </div>
+    <div id="pubList"></div>
+  </section>
+
   <!-- ====================================================== REPORTS ==== -->
   <section class="view hidden" id="v-reports">
     <div class="card">
@@ -866,6 +985,14 @@ table.rt td.mono { font-family: "Cascadia Mono", Consolas, monospace; white-spac
 
     <div class="card">
       <h2>Appearance</h2>
+      <div class="field">
+        <label class="fl">Text size</label>
+        <div class="tsize-row">
+          <button class="btn sm" id="tsDown">A−</button>
+          <span class="tsize-demo" id="tsDemo">Sample text</span>
+          <button class="btn sm" id="tsUp">A+</button>
+        </div>
+      </div>
       <div class="row">
         <button class="btn sm" data-theme-set="light">Light</button>
         <button class="btn sm" data-theme-set="dim">Dim</button>
@@ -934,6 +1061,7 @@ table.rt td.mono { font-family: "Cascadia Mono", Consolas, monospace; white-spac
 </nav>
 
 <div class="mark-bar" id="markBar"></div>
+<div class="bulk-bar" id="bulkBar"></div>
 
 <div class="toast" id="toast"></div>
 
@@ -8788,6 +8916,7 @@ function blankState() {
     findings: {},       /* severity, close-out, photos              */
     practice: {},       /* Leitner boxes, global rather than per ship */
     annotations: {},    /* highlights and text styling over the library */
+    readiness: {},      /* one sample a day, for the trend line             */
     settings: { theme: "light" },
     modified: nowISO()
   };
@@ -9974,7 +10103,7 @@ function markActionLabel(action) {
    ========================================================================= */
 
 const VIEWS = ["dashboard", "library", "detail", "findings", "practice",
-               "reports", "particulars", "profile", "settings"];
+               "reports", "publications", "particulars", "profile", "settings"];
 let currentView = "dashboard";
 let detailQid = null;
 let backTo = "library";
@@ -10001,10 +10130,12 @@ function show(view, opts) {
 function render(view) {
   if (view === "dashboard")   renderDashboard();
   if (view === "library")     renderLibrary();
+  else if (typeof renderBulkBar === "function") renderBulkBar();
   if (view === "detail")      renderDetail();
   if (view === "findings")    renderFindings();
   if (view === "practice")    renderPractice();
   if (view === "reports")     renderReports();
+  if (view === "publications") renderPublications();
   if (view === "particulars") renderParticulars();
   if (view === "profile")     renderProfile();
   if (view === "settings")    renderSettings();
@@ -10063,6 +10194,68 @@ function bindFollowChips(qid) {
   });
 }
 
+function renderProgressCard() {
+  const host = $("#dashProgress");
+  if (!host) return;
+
+  const cd = countdown();
+  const hist = readinessHistory(null, 45);
+  const proj = projection();
+
+  if (!cd && hist.length < 2) {
+    host.innerHTML = cd === null
+      ? '<div class="card"><div class="small">Set a planned inspection date on this ' +
+        'inspection and the dashboard will count down and tell you whether you are on track. ' +
+        '<a href="#" id="lnkDate">Set a date</a></div></div>'
+      : "";
+    const l = $("#lnkDate");
+    if (l) l.onclick = e => {
+      e.preventDefault();
+      const c = activeCampaign();
+      if (c) openCampaignSheet(c.id);
+    };
+    return;
+  }
+
+  host.innerHTML =
+    '<div class="card">' +
+      (cd
+        ? '<div class="spread">' +
+            "<div>" +
+              '<div class="tiny">' + (cd.past ? "SINCE INSPECTION" : "TO INSPECTION") + "</div>" +
+              '<div class="count-days" style="color:' +
+                (cd.past ? "var(--muted)" : cd.days <= 7 ? "var(--bad)" :
+                 cd.days <= 21 ? "var(--warn)" : "var(--accent)") + '">' +
+                Math.abs(cd.days) + "</div>" +
+              '<div class="count-sub">' + esc(cd.label) + " · " + fmtDate(cd.date) + "</div>" +
+            "</div>" +
+            '<div style="text-align:right">' +
+              '<div class="tiny">READY</div>' +
+              '<div class="big">' + proj.pct + "%</div>" +
+              '<div class="count-sub">' + proj.remaining + " outstanding</div>" +
+            "</div>" +
+          "</div>"
+        : "") +
+
+      (hist.length >= 2
+        ? sparklineSVG(hist, { width: 320, height: 64 }) +
+          '<div class="tiny">Readiness over the last ' + hist.length + " day" +
+          (hist.length === 1 ? "" : "s") + " · " + hist[0].pct + "% → " +
+          hist[hist.length - 1].pct + "%</div>"
+        : '<div class="tiny" style="margin-top:8px">The trend line appears once ' +
+          "there are a couple of days of history.</div>") +
+
+      (proj.note
+        ? '<div class="verdict ' + proj.verdict + '">' + esc(proj.note) + "</div>"
+        : "") +
+    "</div>";
+}
+
+function pubCount(name) {
+  const hit = publicationIndex().find(p => p.name === name);
+  return hit ? hit.ids.length : 1;
+}
+
 function meterHTML(t) {
   const seg = k => t.total ? (t[k] / t.total * 100).toFixed(3) : 0;
   return '<i class="ready" style="width:' + seg("ready") + '%"></i>' +
@@ -10103,11 +10296,39 @@ function renderDashboard() {
     t.ready + " ready · " + t.gap + " gaps · " + t.wip + " in progress · " + t.todo + " not started";
   $("#dashMeter").innerHTML = meterHTML(t);
 
+  /* Build every banner in one pass. Assigning innerHTML again after binding
+     would replace the nodes and silently kill the handlers. */
+  const nudge = backupNudge();
   const hidden = QUESTIONS.length - apps.length;
+  let bhtml = "";
+
+  if (nudge) {
+    bhtml +=
+      '<div class="banner warn"><div>' +
+        (nudge.never
+          ? "You have not exported a backup yet. " + nudge.records +
+            " records live only on this device."
+          : "Last backup was " + nudge.days + " day" + (nudge.days === 1 ? "" : "s") +
+            " ago, and there have been changes since.") +
+        '<div style="margin-top:8px" class="row">' +
+          '<button class="btn sm primary" id="nudgeExport">Export now</button>' +
+          '<button class="btn sm ghost" id="nudgeLater">Not now</button>' +
+        "</div></div></div>";
+  }
+
   if (hidden > 0) {
-    banners.innerHTML =
-      '<div class="banner ok"><div>' + hidden + ' of ' + QUESTIONS.length +
+    bhtml +=
+      '<div class="banner ok"><div>' + hidden + " of " + QUESTIONS.length +
       ' questions are hidden by the vessel profile. <a href="#" id="lnkProfile">Review profile</a></div></div>';
+  }
+
+  banners.innerHTML = bhtml;
+
+  if (nudge) {
+    $("#nudgeExport").onclick = async () => { await doExport(false); renderDashboard(); };
+    $("#nudgeLater").onclick = () => { snoozeNudge(); renderDashboard(); };
+  }
+  if (hidden > 0) {
     $("#lnkProfile").onclick = e => { e.preventDefault(); show("profile"); };
   }
 
@@ -10124,6 +10345,9 @@ function renderDashboard() {
     ? attention.map(q => qRowHTML(q)).join("")
     : '<div class="empty">Nothing flagged. Work through the library to build readiness.</div>';
   bindQRows($("#dashAttention"), "dashboard");
+
+  recordReadiness();
+  renderProgressCard();
 
   const ft = findingStats();
   const ps = practiceStats();
@@ -10164,7 +10388,8 @@ function renderDashboard() {
 
 /* ============================================================== LIBRARY */
 
-const filters = { text: "", chapter: "", section: "", roviq: "", status: "", applicable: true };
+const filters = { text: "", chapter: "", section: "", roviq: "", status: "", applicable: true,
+                  fullText: true, publication: "" };
 let filtersBound = false;
 
 function buildFilterOptions() {
@@ -10200,23 +10425,48 @@ function bindFilters() {
   $("#fSection").onchange = e => { filters.section = e.target.value; renderQList(); };
   $("#fRoviq").onchange   = e => { filters.roviq   = e.target.value; renderQList(); };
   $("#fStatus").onchange  = e => { filters.status  = e.target.value; renderQList(); };
+  $("#fFullText").onclick = () => {
+    filters.fullText = !filters.fullText;
+    $("#fFullText").setAttribute("aria-pressed", String(filters.fullText));
+    renderQList();
+  };
   $("#fApplicable").onclick = () => {
     filters.applicable = !filters.applicable;
     $("#fApplicable").setAttribute("aria-pressed", String(filters.applicable));
     renderQList();
   };
+  $$("#fGroup .chip").forEach(b => {
+    b.onclick = () => {
+      grouping = b.dataset.group;
+      $$("#fGroup .chip").forEach(x =>
+        x.setAttribute("aria-pressed", String(x === b)));
+      renderQList();
+    };
+  });
+  $("#fSelect").onclick = () => {
+    selectMode = !selectMode;
+    if (!selectMode) clearSelection();
+    $("#fSelect").setAttribute("aria-pressed", String(selectMode));
+    $("#fSelect").textContent = selectMode ? "Done" : "Select";
+    renderQList();
+  };
   $("#fClear").onclick = () => {
     filters.text = ""; filters.chapter = ""; filters.section = "";
-    filters.roviq = ""; filters.status = "";
+    filters.roviq = ""; filters.status = ""; filters.publication = "";
     $("#fText").value = ""; $("#fChapter").value = ""; $("#fRoviq").value = ""; $("#fStatus").value = "";
     rebuildSectionOptions(); renderQList();
   };
 }
 
+let grouping = "chapter";
+
 function renderLibrary() {
   if (!$("#fChapter").options.length) buildFilterOptions();
   bindFilters();
   $("#fApplicable").setAttribute("aria-pressed", String(filters.applicable));
+  $("#fFullText").setAttribute("aria-pressed", String(filters.fullText));
+  $$("#fGroup .chip").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.group === grouping)));
   renderQList();
 }
 
@@ -10228,18 +10478,27 @@ function matchingQuestions() {
     if (filters.section && q.section !== filters.section) return false;
     if (filters.roviq && (q.roviq || []).indexOf(filters.roviq) === -1) return false;
     if (filters.status && answerStatus(q.id) !== filters.status) return false;
+    if (filters.publication && (q.publications || []).indexOf(filters.publication) === -1) return false;
     if (filters.text) {
-      const hay = (q.id + " " + q.short + " " + q.question + " " + q.sectionTitle).toLowerCase();
-      if (hay.indexOf(filters.text) === -1) return false;
+      const terms = parseQuery(filters.text);
+      const hit = searchMatch(q, terms, filters.fullText);
+      if (!hit) return false;
+      searchHits[q.id] = hit;
     }
     return true;
   });
 }
 
+let searchHits = {};
+
 function qRowHTML(q) {
   const st = answerStatus(q.id);
   const a = getAnswer(q.id);
-  return '<button class="qrow s-' + st + '" data-qid="' + esc(q.id) + '">' +
+  const picked = !!selected[q.id];
+  return '<button class="qrow s-' + st + (selectMode ? " picking" : "") +
+    (picked ? " picked" : "") + '" data-qid="' + esc(q.id) + '"' +
+    (selectMode ? ' aria-pressed="' + picked + '"' : "") + ">" +
+    (selectMode ? '<span class="tick">' + (picked ? "✓" : "") + "</span>" : "") +
     '<div class="id">' + esc(q.id) + '</div>' +
     '<div class="t">' + esc(q.short || q.question) + '</div>' +
     '<div class="m">' +
@@ -10252,35 +10511,93 @@ function qRowHTML(q) {
         ? '<span class="pill role">+' + ((a.followUp.length - 3)) + '</span>' : "") +
       (a && a.notes ? '<span class="pill plain">note</span>' : "") +
     '</div>' +
+    (searchHits[q.id] && searchHits[q.id].snippet
+      ? '<div class="snip"><span class="snip-f">' + esc(searchHits[q.id].fieldLabel) + "</span> " +
+        highlightTerms(searchHits[q.id].snippet, parseQuery(filters.text)) + "</div>"
+      : "") +
   '</button>';
 }
 
 function bindQRows(root, from) {
   $$(".qrow", root).forEach(b => {
-    b.onclick = () => { detailQid = b.dataset.qid; backTo = from || "library"; show("detail"); };
+    b.onclick = () => {
+      if (suppressClick) { suppressClick = false; return; }
+      if (selectMode && from === "library") {
+        const on = toggleSelected(b.dataset.qid);
+        b.classList.toggle("picked", on);
+        b.setAttribute("aria-pressed", String(on));
+        const tick = b.querySelector(".tick");
+        if (tick) tick.textContent = on ? "✓" : "";
+        renderBulkBar();
+        return;
+      }
+      detailQid = b.dataset.qid;
+      backTo = from || "library";
+      show("detail");
+    };
   });
 }
 
+function groupProgressHTML(list) {
+  const t = tally(list);
+  return '<span class="grp-meter"><i class="ready" style="width:' +
+    (t.total ? (t.ready / t.total * 100).toFixed(1) : 0) + '%"></i>' +
+    '<i class="gap" style="width:' + (t.total ? (t.gap / t.total * 100).toFixed(1) : 0) + '%"></i>' +
+    "</span>" +
+    '<span class="grp-n">' + t.ready + "/" + t.total + "</span>";
+}
+
 function renderQList() {
+  searchHits = {};
   const list = matchingQuestions();
+  const active = $("#fActive");
+  if (active) {
+    active.innerHTML = filters.publication
+      ? '<span class="pill tag">Publication: ' + esc(filters.publication.slice(0, 60)) +
+        (filters.publication.length > 60 ? "…" : "") +
+        ' <button class="linkx" id="fPubClear">✕</button></span>'
+      : "";
+    const x = $("#fPubClear");
+    if (x) x.onclick = e => { e.stopPropagation(); filters.publication = ""; renderQList(); };
+  }
   $("#fCount").textContent = list.length + " of " + QUESTIONS.length + " questions" +
     (filters.applicable ? " (applicable only)" : "");
 
   const host = $("#qList");
   if (!list.length) {
     host.innerHTML = '<div class="empty">No questions match these filters.</div>';
+    renderBulkBar();
     return;
   }
-  let html = "", sec = null;
-  list.forEach(q => {
-    if (q.section !== sec) {
-      sec = q.section;
-      html += '<div class="sechead">' + esc(sec) + " · " + esc(q.sectionTitle) + '</div>';
-    }
-    html += qRowHTML(q);
-  });
+
+  let html = "";
+  if (grouping === "walk") {
+    let leg = null;
+    walkGroups(list).forEach(g => {
+      if (g.leg !== leg) {
+        leg = g.leg;
+        html += '<div class="leghead">' + esc(leg) + "</div>";
+      }
+      html += '<div class="sechead">' + esc(g.stage) +
+        groupProgressHTML(g.questions) + "</div>";
+      g.questions.forEach(q => { html += qRowHTML(q); });
+    });
+  } else {
+    let sec = null;
+    const bySec = {};
+    list.forEach(q => { (bySec[q.section] = bySec[q.section] || []).push(q); });
+    list.forEach(q => {
+      if (q.section !== sec) {
+        sec = q.section;
+        html += '<div class="sechead">' + esc(sec) + " · " + esc(q.sectionTitle) +
+          groupProgressHTML(bySec[sec]) + "</div>";
+      }
+      html += qRowHTML(q);
+    });
+  }
   host.innerHTML = html;
   bindQRows(host, "library");
+  renderBulkBar();
 }
 
 /* =============================================================== DETAIL */
@@ -10301,7 +10618,9 @@ function renderDetail() {
     '<div class="card">' +
       '<div class="spread mb">' +
         '<button class="btn sm ghost" id="dBack">← Back</button>' +
-        '<span class="mono small">' + esc(q.id) + '</span>' +
+        '<div class="row">' +
+          '<button class="btn sm ghost" id="dShare">Share</button>' +
+          '<span class="mono small">' + esc(q.id) + "</span></div>" +
       '</div>' +
       '<div class="tiny">' + esc(q.chapter + ". " + (LIB.chapterTitles[q.chapter] || "")) +
         " · " + esc(q.section) + " " + esc(q.sectionTitle) + '</div>' +
@@ -10373,7 +10692,11 @@ function renderDetail() {
 
     (q.publications && q.publications.length ?
       '<div class="card"><div class="blk"><h3>Publications</h3><ul>' +
-        q.publications.map(p => '<li>' + esc(p) + '</li>').join("") + '</ul></div></div>' : "") +
+        q.publications.map(p =>
+          '<li><button class="linkish" data-pub="' + esc(p) + '">' + esc(p) + "</button>" +
+          '<span class="tiny"> — cited by ' + pubCount(p) + " question" +
+          (pubCount(p) === 1 ? "" : "s") + "</span></li>").join("") +
+      '</ul></div></div>' : "") +
 
     '<div class="card">' +
       '<h2>Photos &amp; files</h2>' +
@@ -10391,6 +10714,8 @@ function renderDetail() {
     '</div>';
 
   $("#dBack").onclick = () => show(backTo, { keepScroll: false });
+  $("#dShare").onclick = () => shareText(questionShareText(q.id),
+    "SIRE 2.0 " + q.id, (getAnswer(q.id) || {}).photos);
 
   const cm = $("#dClearMarks");
   if (cm) cm.onclick = () => {
@@ -10420,6 +10745,15 @@ function renderDetail() {
   };
   dRepaint();
   wireAttachControls("dAtt", dTarget, dRepaint);
+
+  $$("#detailBody [data-pub]").forEach(b => {
+    b.onclick = () => {
+      filters.publication = b.dataset.pub;
+      filters.text = ""; filters.chapter = ""; filters.section = "";
+      const t = $("#fText"); if (t) t.value = "";
+      show("library");
+    };
+  });
 
   $("#dAddFinding").onclick = () => openFindingSheet(null, q.id);
   const linked = findingsFor().filter(f => f.qid === q.id);
@@ -10578,6 +10912,7 @@ function renderSettings() {
   $("#btnNewCampaign").onclick = () => openCampaignSheet(null);
 
   renderSync();
+  renderTextSize();
   renderRoles();
   renderShortcuts();
   renderDesktop();
@@ -10854,6 +11189,7 @@ function openFindingSheet(id, presetQid) {
          '<div id="fdFiles" style="margin-top:10px"></div></div>' : "") +
     '<div class="row" style="margin-top:6px">' +
       '<button class="btn primary grow" id="fdSave">Save</button>' +
+      (f ? '<button class="btn" id="fdShare">Share</button>' : "") +
       (f && f.status !== "closed" ? '<button class="btn" id="fdClose">Close out</button>' : "") +
       (f && f.status === "closed" ? '<button class="btn" id="fdReopen">Reopen</button>' : "") +
       '<button class="btn ghost" id="fdCancel">Cancel</button>' +
@@ -10870,6 +11206,11 @@ function openFindingSheet(id, presetQid) {
     };
     fRepaint();
     wireAttachControls("fdAtt", fTarget, fRepaint);
+  }
+
+  if (f && $("#fdShare")) {
+    $("#fdShare").onclick = () => shareText(findingShareText(STATE.findings[f.id]),
+      "SIRE 2.0 finding", (STATE.findings[f.id] || {}).photos);
   }
 
   $("#fdCancel").onclick = closeSheet;
@@ -11228,7 +11569,9 @@ const REPORTS = [
   { k: "findings",    title: "Findings register",        desc: "Every finding with detail, close-out and photographs." },
   { k: "particulars", title: "Vessel particulars sheet", desc: "Chapter 1 particulars as a single reference sheet." },
   { k: "marks",       title: "Highlights & marked text",  desc: "Only the passages you have marked, filtered by colour or emphasis." },
-  { k: "followup",    title: "Follow-up by role",          desc: "A separate section for each person, listing what they need to close out." }
+  { k: "followup",    title: "Follow-up by role",          desc: "A separate section for each person, listing what they need to close out." },
+  { k: "publications", title: "Publications to have ready", desc: "Every publication the questions rest on, and which questions need each." },
+  { k: "interview",   title: "Interview prep packs",        desc: "A one-sheet per rank: what the inspector will ask that person, and what to have ready." }
 ];
 
 const repOpts = {
@@ -11239,6 +11582,9 @@ const repOpts = {
   marks: true,
   markStyles: null,        /* null = every style */
   followRoles: null,       /* null = every role  */
+  interviewStages: null,   /* null = every stage */
+  interviewDepth: "evidence",
+  interviewBrief: false,
   followUnassigned: true,
   closed: true,
   hideNotApplicable: true
@@ -11750,6 +12096,139 @@ function markedItems(opts) {
   return items;
 }
 
+function publicationItems(opts) {
+  const items = [];
+  const list = publicationsForProfile(opts.hideNotApplicable !== false);
+
+  const head = el("div");
+  head.innerHTML =
+    "<h2>Publications to have ready</h2>" +
+    '<p class="lead">' + list.length + " publication" + (list.length === 1 ? "" : "s") +
+    " are referenced by the questions that apply to this vessel. The count shows how " +
+    "many questions rest on each, so the heaviest can be gathered first.</p>";
+  items.push({ type: "el", node: head, newPage: true });
+
+  if (!list.length) {
+    items.push({ type: "el", node: el("p", "muted", "No publications are referenced.") });
+    return items;
+  }
+
+  items.push({
+    type: "table",
+    caption: "Most referenced first",
+    head: "<tr><th>Publication</th><th>Source</th><th>Questions</th></tr>",
+    rows: list.map(p =>
+      "<td>" + esc(p.name) + "</td>" +
+      "<td>" + esc(p.publisher) + "</td>" +
+      '<td class="num">' + p.ids.length + "</td>")
+  });
+
+  /* the detail: which questions rest on each, so a missing document can be
+     traced straight to what it would cost */
+  const detail = el("div");
+  detail.innerHTML = "<h2>Where each is needed</h2>";
+  items.push({ type: "el", node: detail, newPage: true });
+
+  items.push({
+    type: "table",
+    head: "<tr><th>Publication</th><th>Questions</th></tr>",
+    rows: list.map(p =>
+      "<td>" + esc(p.name) + "</td>" +
+      '<td class="mono">' + esc(p.ids.join(", ")) + "</td>")
+  });
+
+  return items;
+}
+
+/* One pack per interview stage, written for the person being interviewed
+   rather than for the preparer — what you may be asked, what to have to hand,
+   and what would read badly. */
+function interviewItems(opts) {
+  const items = [];
+  const chosen = (opts.interviewStages && opts.interviewStages.length)
+    ? opts.interviewStages : INTERVIEW_KEYS;
+  const counts = interviewCounts(opts);
+  const active = chosen.filter(k => counts[k] > 0);
+
+  const head = el("div");
+  head.innerHTML =
+    "<h2>Interview preparation</h2>" +
+    '<p class="lead">The SIRE 2.0 library marks which questions an inspector puts to a ' +
+    "person rather than to the ship. Each section below is a single sheet that can be " +
+    "handed to whoever will be asked.</p>" +
+    '<table class="rt"><thead><tr><th>Interview</th><th>Usually</th><th>Questions</th></tr></thead><tbody>' +
+    active.map(k => "<tr><td><b>" + esc(k.replace(/^Interview\s*-?\s*/, "")) + "</b></td>" +
+      "<td>" + esc(interviewWho(k)) + "</td>" +
+      '<td class="num">' + counts[k] + "</td></tr>").join("") +
+    "</tbody></table>";
+  items.push({ type: "el", node: head, newPage: true });
+
+  if (!active.length) {
+    items.push({ type: "el", node: el("p", "muted",
+      "No interview questions apply to this vessel with the current profile.") });
+    return items;
+  }
+
+  active.forEach(stage => {
+    const list = interviewQuestions(stage, opts);
+    const t = tally(list);
+    const label = stage.replace(/^Interview\s*-?\s*/, "");
+
+    const sh = el("div");
+    sh.innerHTML =
+      "<h2>Interview prep — " + esc(label) + "</h2>" +
+      '<p class="lead">Usually ' + esc(interviewWho(stage)) + ". " +
+      list.length + " question" + (list.length === 1 ? "" : "s") + " · " +
+      t.ready + " ready, " + t.gap + " gap" + (t.gap === 1 ? "" : "s") + ".</p>" +
+      '<div class="callout">Read the question, then the evidence. If you would ' +
+      "struggle to show what is listed, say so now rather than during the inspection.</div>";
+    items.push({ type: "el", node: sh, newPage: true });
+
+    list.forEach(q => {
+      const a = getAnswer(q.id) || {};
+      const st = answerStatus(q.id);
+      const card = el("div", "qcard " + st);
+
+      const evidence = (q.evidence || []).filter(b => b && b.t === "li");
+      const negatives = (q.negatives || []).filter(b => b && b.t === "li");
+
+      let html =
+        '<div class="qid">' + esc(q.id) + "</div>" +
+        '<div class="qh">' + esc(q.short) + "</div>" +
+        '<div class="qmeta">' + stChip(st) +
+          (followUpOf(q.id).length ? " &nbsp;·&nbsp; " + esc(followUpOf(q.id).join(", ")) : "") +
+        "</div>" +
+        "<h4>You may be asked</h4><p>" +
+          (opts.marks ? markupText(q.question, q.id, "question", 0) : esc(q.question)) + "</p>";
+
+      if (evidence.length) {
+        html += "<h4>Have this ready</h4><ul>" +
+          evidence.map((b, i) => {
+            const idx = (q.evidence || []).indexOf(b);
+            return "<li>" + ((a.evidence && a.evidence[i]) ? "☑ " : "☐ ") +
+              (opts.marks ? markupText(b.x, q.id, "evidence", idx) : esc(b.x)) + "</li>";
+          }).join("") + "</ul>";
+      }
+
+      if (!opts.interviewBrief && negatives.length) {
+        html += "<h4>What would read badly</h4><ul>" +
+          negatives.slice(0, 8).map(b => "<li>" + esc(b.x) + "</li>").join("") +
+          (negatives.length > 8
+            ? '<li class="muted">…and ' + (negatives.length - 8) + " more in the library.</li>"
+            : "") +
+          "</ul>";
+      }
+
+      if (a.notes) html += '<div class="qnote"><b>Ship note.</b> ' + esc(a.notes) + "</div>";
+
+      card.innerHTML = html;
+      items.push({ type: "el", node: card });
+    });
+  });
+
+  return items;
+}
+
 /* Each role gets its own pages, so a section can be torn off and handed over. */
 function followUpItems(opts) {
   const items = [];
@@ -11858,6 +12337,12 @@ async function buildReportItems(opts) {
     items = items.concat(markedItems(opts));
   } else if (opts.kind === "followup") {
     items = items.concat(followUpItems(opts));
+  } else if (opts.kind === "publications") {
+    items = items.concat(publicationItems(opts));
+  } else if (opts.kind === "interview") {
+    items = items.concat(interviewItems(opts));
+  } else if (opts.kind === "interview") {
+    items = items.concat(interviewItems(opts));
   }
   return { items: items, meta: meta };
 }
@@ -12010,6 +12495,7 @@ function openReportOptions(kind) {
   const needsChapter = kind === "chapter";
   const isMarks = kind === "marks";
   const isFollow = kind === "followup";
+  const isInterview = kind === "interview";
   const needsDetail  = kind === "full" || kind === "chapter";
   const needsPhotos  = kind !== "particulars" && kind !== "attention";
   const needsClosed  = kind === "full" || kind === "findings";
@@ -12045,6 +12531,27 @@ function openReportOptions(kind) {
           chapterStats().map(c =>
             '<option value="' + c.chapter + '">' + c.chapter + ". " + esc(c.title) + "</option>").join("") +
         "</select></div>"
+      : "") +
+    (isInterview
+      ? '<div class="field"><label class="fl">Which interviews</label>' +
+        '<div class="chips roles" id="roIv">' +
+          INTERVIEW_STAGES.map(st => {
+            const n = interviewQuestions(st.stage, repOpts).length;
+            const on = !repOpts.interviewStages || repOpts.interviewStages.indexOf(st.stage) !== -1;
+            return '<button class="chip role" data-iv="' + esc(st.stage) + '" aria-pressed="' +
+              (on && n > 0) + '"' + (n ? "" : " disabled") + ">" +
+              esc(st.stage.replace(/^Interview\s*-?\s*/, "")) + " (" + n + ")</button>";
+          }).join("") +
+        "</div>" +
+        '<div class="row" style="margin-top:8px">' +
+          '<button class="btn sm ghost" id="roIvAll">All</button>' +
+          '<button class="btn sm ghost" id="roIvNone">None</button>' +
+        "</div></div>" +
+        '<label class="switch"><input type="checkbox" id="roIvBrief"' +
+          (repOpts.interviewBrief ? " checked" : "") + ">" +
+          '<span><span class="t">Short version</span>' +
+          '<span class="d">Question and evidence only, leaving out what would read badly.</span>' +
+          "</span></label>"
       : "") +
     (isFollow
       ? '<div class="field"><label class="fl">Include which roles</label>' +
@@ -12117,6 +12624,18 @@ function openReportOptions(kind) {
   $("#roCancel").onclick = closeSheet;
   $("#sheet .scrim").onclick = closeSheet;
 
+  if (isInterview) {
+    $$("#roIv .chip").forEach(c => {
+      if (c.disabled) return;
+      c.onclick = () => c.setAttribute("aria-pressed",
+        c.getAttribute("aria-pressed") === "true" ? "false" : "true");
+    });
+    $("#roIvAll").onclick = () =>
+      $$("#roIv .chip").forEach(c => { if (!c.disabled) c.setAttribute("aria-pressed", "true"); });
+    $("#roIvNone").onclick = () =>
+      $$("#roIv .chip").forEach(c => c.setAttribute("aria-pressed", "false"));
+  }
+
   if (isFollow) {
     const used = rolesInUse();
     const setAll = on => {
@@ -12163,7 +12682,31 @@ function openReportOptions(kind) {
     if ($("#roPhotos"))  repOpts.photos  = $("#roPhotos").checked;
     if ($("#roClosed"))  repOpts.closed  = $("#roClosed").checked;
     if ($("#roMarks"))   repOpts.marks   = $("#roMarks").checked;
-    if (isFollow) {
+    if (isInterview) {
+    $$("#roIv .chip").forEach(c => {
+      if (c.disabled) return;
+      c.onclick = () => c.setAttribute("aria-pressed",
+        c.getAttribute("aria-pressed") === "true" ? "false" : "true");
+    });
+    $("#roIvAll").onclick = () =>
+      $$("#roIv .chip").forEach(c => { if (!c.disabled) c.setAttribute("aria-pressed", "true"); });
+    $("#roIvNone").onclick = () =>
+      $$("#roIv .chip").forEach(c => c.setAttribute("aria-pressed", "false"));
+  }
+
+  if (isInterview) {
+    $("#roDepth").value = repOpts.interviewDepth || "evidence";
+    $$("#roStages .chip").forEach(c => {
+      c.onclick = () => c.setAttribute("aria-pressed",
+        c.getAttribute("aria-pressed") === "true" ? "false" : "true");
+    });
+    $("#roStagesAll").onclick = () =>
+      $$("#roStages .chip").forEach(c => c.setAttribute("aria-pressed", "true"));
+    $("#roStagesNone").onclick = () =>
+      $$("#roStages .chip").forEach(c => c.setAttribute("aria-pressed", "false"));
+  }
+
+  if (isFollow) {
     const used = rolesInUse();
     const setAll = on => {
       $$("#roRoles .chip").forEach(c => c.setAttribute("aria-pressed", String(on)));
@@ -12262,7 +12805,8 @@ function wireReports() {
    ========================================================================= */
 
 const EXPORT_KIND = "backup";
-const RECORD_MAPS = ["answers", "particulars", "profiles", "findings", "practice", "annotations"];
+const RECORD_MAPS = ["answers", "particulars", "profiles", "findings", "practice",
+                     "annotations", "readiness"];
 
 function deviceId() {
   let d = null;
@@ -12307,6 +12851,7 @@ async function buildExport(withMedia) {
       findings: STATE.findings,
       practice: STATE.practice,
       annotations: STATE.annotations,
+      readiness: STATE.readiness,
       settings: STATE.settings
     }
   };
@@ -12362,10 +12907,11 @@ async function doExport(withMedia) {
   if (Store.mode === "desktop" && DESK && typeof DESK.save_export === "function") {
     try {
       const where = await DESK.save_export(name, JSON.stringify(payload));
-      if (where) { toast("Saved to " + where); return true; }
+      if (where) { markExported(); toast("Saved to " + where); return true; }
     } catch (e) { console.warn("desktop export failed, falling back", e); }
   }
   const ok = downloadJSON(payload, name);
+  if (ok) markExported();
   toast(ok ? "Backup exported" : "Could not export");
   return ok;
 }
@@ -12764,7 +13310,23 @@ function renderSync() {
     '<button class="btn block primary" id="btnImport" style="margin-bottom:8px">Import &amp; merge a backup</button>' +
     '<div class="tiny">Merging never overwrites newer work: for every record the ' +
     'later edit wins, new records are added, and importing the same file twice ' +
-    'changes nothing.</div>';
+    'changes nothing.</div>' +
+    '<div class="field" style="margin:14px 0 0">' +
+      '<label class="fl" for="nudgeSel">Remind me to back up</label>' +
+      '<select id="nudgeSel">' +
+        NUDGE_INTERVALS.map(n => '<option value="' + n.d + '"' +
+          (n.d === nudgeDays() ? " selected" : "") + ">" + esc(n.label) + "</option>").join("") +
+      "</select></div>" +
+    '<div class="tiny" id="lastExport"></div>';
+
+  const last = (STATE.settings || {}).lastExportAt;
+  $("#lastExport").textContent = last
+    ? "Last backup " + String(last).replace("T", " ").slice(0, 16)
+    : "No backup has been exported from this device yet.";
+  $("#nudgeSel").onchange = e => {
+    setNudgeDays(e.target.value);
+    toast(Number(e.target.value) ? "Reminder set" : "Reminders off");
+  };
 
   $("#btnExport").onclick = () => doExport(false);
   $("#btnExportMedia").onclick = async () => {
@@ -13077,6 +13639,18 @@ function finishCapture(combo) {
    Follow-up roles editor
    ========================================================================= */
 
+function renderTextSize() {
+  const demo = $("#tsDemo");
+  if (!demo) return;
+  const cur = textScale();
+  const step = TEXT_SCALES.find(x => Math.abs(x.v - cur) < 0.001);
+  demo.textContent = (step ? step.label : "Custom") +
+    " — the quick brown fox jumps over the lazy dog";
+  const up = $("#tsUp"), down = $("#tsDown");
+  if (up) up.onclick = () => { const s2 = stepTextScale(1); toast(s2.label); renderTextSize(); };
+  if (down) down.onclick = () => { const s2 = stepTextScale(-1); toast(s2.label); renderTextSize(); };
+}
+
 function renderRoles() {
   const box = $("#rolesBox");
   if (!box) return;
@@ -13152,6 +13726,193 @@ function renderRoles() {
     resetRoles();
     renderRoles();
     toast("Roles restored");
+  };
+}
+
+/* ============================================================================
+   Bulk action bar
+   ========================================================================= */
+
+function renderBulkBar() {
+  const bar = $("#bulkBar");
+  if (!bar) return;
+
+  if (!selectMode || currentView !== "library") {
+    bar.classList.remove("on");
+    return;
+  }
+
+  const n = selectedCount();
+  bar.classList.add("on");
+  bar.innerHTML =
+    '<div class="bulk-inner">' +
+      '<span class="bulk-n">' + n + " selected</span>" +
+      '<button class="btn sm ghost" id="bkAll">All shown</button>' +
+      '<button class="btn sm ghost" id="bkNone"' + (n ? "" : " disabled") + ">Clear</button>" +
+      '<span class="mb-sep"></span>' +
+      '<button class="btn sm" id="bkStatus"' + (n ? "" : " disabled") + ">Status</button>" +
+      '<button class="btn sm" id="bkFollow"' + (n ? "" : " disabled") + ">Follow up</button>" +
+      '<button class="btn sm" id="bkOwner"' + (n ? "" : " disabled") + ">Responsible</button>" +
+    "</div>";
+
+  $("#bkAll").onclick = () => {
+    matchingQuestions().forEach(q => { selected[q.id] = true; });
+    renderQList();
+  };
+  $("#bkNone").onclick = () => { clearSelection(); renderQList(); };
+
+  $("#bkStatus").onclick = () => {
+    openSheet(
+      "<h2>Set status</h2>" +
+      '<div class="sub">' + selectedCount() + " question" +
+        (selectedCount() === 1 ? "" : "s") + " selected.</div>" +
+      STATUSES.map(st =>
+        '<button class="btn block" data-bulk-st="' + st.k + '" style="margin-bottom:8px">' +
+        esc(st.label) + "</button>").join("") +
+      '<button class="btn ghost block" data-sheet-close="1">Cancel</button>'
+    );
+    $$("#sheetPanel [data-bulk-st]").forEach(b => {
+      b.onclick = () => {
+        const n2 = bulkStatus(b.dataset.bulkSt);
+        closeSheet();
+        renderQList();
+        toast(n2 + " set to " + STATUS_LABEL[b.dataset.bulkSt].toLowerCase());
+      };
+    });
+    $$("#sheetPanel [data-sheet-close]").forEach(b => { b.onclick = closeSheet; });
+    $("#sheet .scrim").onclick = closeSheet;
+  };
+
+  $("#bkFollow").onclick = () => {
+    const ids = selectedIds();
+    /* show what is already set across the selection, so the sheet is honest
+       about a role being on some of them but not all */
+    const counts = {};
+    ids.forEach(qid => followUpOf(qid).forEach(r => { counts[r] = (counts[r] || 0) + 1; }));
+
+    openSheet(
+      "<h2>Follow up with</h2>" +
+      '<div class="sub">' + ids.length + " question" + (ids.length === 1 ? "" : "s") +
+      " selected. Tap to add to all, tap again to remove from all.</div>" +
+      '<div class="chips roles" id="bkRoles">' +
+        roles().map(r => {
+          const c = counts[r] || 0;
+          const state = c === 0 ? "none" : (c === ids.length ? "all" : "some");
+          return '<button class="chip role bk-' + state + '" data-role="' + esc(r) +
+            '" aria-pressed="' + (state === "all") + '">' + esc(r) +
+            (state === "some" ? " (" + c + ")" : "") + "</button>";
+        }).join("") +
+      "</div>" +
+      '<button class="btn ghost block" id="bkFollowClear" style="margin-top:12px">Clear follow-up on all</button>' +
+      '<button class="btn primary block" id="bkFollowDone" style="margin-top:8px">Done</button>'
+    );
+
+    $$("#bkRoles .chip").forEach(b => {
+      b.onclick = () => {
+        const on = b.getAttribute("aria-pressed") === "true";
+        const n2 = bulkFollow(b.dataset.role, on ? "remove" : "add");
+        b.setAttribute("aria-pressed", String(!on));
+        b.className = "chip role bk-" + (on ? "none" : "all");
+        b.textContent = b.dataset.role;
+        toast((on ? "Removed from " : "Added to ") + n2);
+      };
+    });
+    $("#bkFollowClear").onclick = () => {
+      const n2 = bulkClearFollow();
+      closeSheet();
+      renderQList();
+      toast("Cleared on " + n2);
+    };
+    $("#bkFollowDone").onclick = () => { closeSheet(); renderQList(); };
+    $("#sheet .scrim").onclick = () => { closeSheet(); renderQList(); };
+  };
+
+  $("#bkOwner").onclick = () => {
+    openSheet(
+      "<h2>Responsible</h2>" +
+      '<div class="sub">Applies to all ' + selectedCount() + " selected.</div>" +
+      '<div class="field"><input type="text" id="bkOwnerVal" placeholder="e.g. C/O"></div>' +
+      '<div class="row"><button class="btn primary grow" id="bkOwnerSave">Set</button>' +
+      '<button class="btn ghost" data-sheet-close="1">Cancel</button></div>'
+    );
+    $("#bkOwnerSave").onclick = () => {
+      const n2 = bulkOwner($("#bkOwnerVal").value.trim());
+      closeSheet();
+      renderQList();
+      toast("Set on " + n2);
+    };
+    $$("#sheetPanel [data-sheet-close]").forEach(b => { b.onclick = closeSheet; });
+    $("#sheet .scrim").onclick = closeSheet;
+  };
+}
+
+/* ============================================================================
+   Publications — the library inverted, so paperwork can be gathered once
+   ========================================================================= */
+
+let pubFilter = "";
+let pubApplicableOnly = true;
+
+function renderPublications() {
+  const host = $("#pubList");
+  if (!host) return;
+
+  const stats = publicationStats(pubApplicableOnly);
+  const head = $("#pubHead");
+  if (head) {
+    head.innerHTML =
+      '<div class="big">' + stats.total + "</div>" +
+      '<div class="small">publication' + (stats.total === 1 ? "" : "s") +
+      " referenced" + (pubApplicableOnly ? " by questions that apply to this vessel" : "") +
+      " · " + stats.single + " cited by a single question</div>";
+  }
+
+  const q = pubFilter.trim().toLowerCase();
+  let list = publicationsForProfile(pubApplicableOnly);
+  if (q) list = list.filter(p => p.name.toLowerCase().indexOf(q) !== -1);
+
+  if (!list.length) {
+    host.innerHTML = '<div class="empty">Nothing matches that.</div>';
+    return;
+  }
+
+  let html = "", publisher = null;
+  list.forEach(p => {
+    if (p.publisher !== publisher && !q) {
+      publisher = p.publisher;
+      html += '<div class="leghead">' + esc(publisher) + "</div>";
+    }
+    const long = p.name.length > 150;
+    html += '<div class="card flat pubrow">' +
+      '<div class="spread">' +
+        '<div class="grow"><div class="pubname">' +
+          esc(long ? p.name.slice(0, 150) + "…" : p.name) + "</div>" +
+        '<div class="tiny">' + p.ids.length + " question" + (p.ids.length === 1 ? "" : "s") +
+        " · " + esc(p.ids.slice(0, 6).join(", ")) +
+        (p.ids.length > 6 ? " +" + (p.ids.length - 6) : "") + "</div></div>" +
+        '<button class="btn sm" data-pub-show="' + esc(p.name) + '">Show</button>' +
+      "</div></div>";
+  });
+  host.innerHTML = html;
+
+  $$("#pubList [data-pub-show]").forEach(b => {
+    b.onclick = () => {
+      filters.publication = b.dataset.pubShow;
+      filters.text = ""; filters.chapter = ""; filters.section = ""; filters.status = "";
+      const t = $("#fText"); if (t) t.value = "";
+      show("library");
+    };
+  });
+}
+
+function wirePublications() {
+  const search = $("#pubSearch");
+  if (search) search.oninput = e => { pubFilter = e.target.value; renderPublications(); };
+  const only = $("#pubApplicable");
+  if (only) only.onclick = () => {
+    pubApplicableOnly = !pubApplicableOnly;
+    only.setAttribute("aria-pressed", String(pubApplicableOnly));
+    renderPublications();
   };
 }
 
@@ -13501,6 +14262,854 @@ async function renderStorage() {
 }
 
 /* ============================================================================
+   Full-text search across the whole library, and the publications index.
+   ========================================================================= */
+
+const SEARCH_FIELDS = [
+  { k: "short",       label: "Short text" },
+  { k: "question",    label: "Question" },
+  { k: "objective",   label: "Objective" },
+  { k: "guidance",    label: "Industry guidance" },
+  { k: "inspection",  label: "Inspection guidance" },
+  { k: "actions",     label: "Inspector actions" },
+  { k: "evidence",    label: "Expected evidence" },
+  { k: "negatives",   label: "Negative observation" },
+  { k: "publications", label: "Publications" }
+];
+
+let SEARCH_INDEX = null;
+
+function flattenField(q, field) {
+  const v = q[field];
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (!Array.isArray(v)) return "";
+  return v.map(b => (typeof b === "string" ? b : (b && (b.x || b.text)) || "")).join(" \u2022 ");
+}
+
+/* Built once, lazily — the first full-text search pays for it, not startup. */
+function buildSearchIndex() {
+  if (SEARCH_INDEX) return SEARCH_INDEX;
+  SEARCH_INDEX = {};
+  QUESTIONS.forEach(q => {
+    const fields = {};
+    SEARCH_FIELDS.forEach(f => {
+      const t = flattenField(q, f.k);
+      if (t) fields[f.k] = t;
+    });
+    fields.__meta = q.id + " " + (q.sectionTitle || "");
+    const lower = {};
+    Object.keys(fields).forEach(k => { lower[k] = fields[k].toLowerCase(); });
+    SEARCH_INDEX[q.id] = { fields: fields, lower: lower };
+  });
+  return SEARCH_INDEX;
+}
+
+/* "enclosed space" entry  ->  ['enclosed space', 'entry']  */
+function parseQuery(text) {
+  const terms = [];
+  const re = /"([^"]+)"|(\S+)/g;
+  let m;
+  while ((m = re.exec(String(text || "")))) {
+    const t = (m[1] || m[2] || "").trim().toLowerCase();
+    if (t) terms.push(t);
+  }
+  return terms;
+}
+
+/* Returns null when the question does not match, otherwise where it matched. */
+function searchMatch(q, terms, fullText) {
+  if (!terms.length) return { fields: [], snippet: "" };
+  const idx = fullText ? buildSearchIndex()[q.id] : null;
+
+  const haystacks = fullText
+    ? idx.lower
+    : {
+        short: String(q.short || "").toLowerCase(),
+        question: String(q.question || "").toLowerCase(),
+        __meta: (q.id + " " + (q.sectionTitle || "")).toLowerCase()
+      };
+
+  const keys = Object.keys(haystacks);
+  const hitFields = {};
+
+  for (const term of terms) {
+    let found = false;
+    for (const k of keys) {
+      if (haystacks[k].indexOf(term) !== -1) {
+        found = true;
+        if (k !== "__meta") hitFields[k] = true;
+      }
+    }
+    if (!found) return null;          /* every term must appear somewhere */
+  }
+
+  /* a snippet from the first body field that matched, so the row shows why */
+  let snippet = "";
+  const order = SEARCH_FIELDS.map(f => f.k).filter(k => hitFields[k] && k !== "short" && k !== "question");
+  const from = order[0];
+  if (from && fullText) {
+    const text = idx.fields[from];
+    const low = idx.lower[from];
+    let at = -1, hit = "";
+    for (const term of terms) {
+      const p = low.indexOf(term);
+      if (p !== -1 && (at === -1 || p < at)) { at = p; hit = term; }
+    }
+    if (at !== -1) {
+      const start = Math.max(0, at - 55);
+      const end = Math.min(text.length, at + hit.length + 75);
+      snippet = (start > 0 ? "…" : "") + text.slice(start, end).trim() + (end < text.length ? "…" : "");
+    }
+  }
+
+  return {
+    fields: Object.keys(hitFields),
+    snippet: snippet,
+    fieldLabel: from ? (SEARCH_FIELDS.find(f => f.k === from) || {}).label : ""
+  };
+}
+
+/* Wrap the search terms in the snippet so the eye lands on them. */
+function highlightTerms(text, terms) {
+  let out = esc(text);
+  terms.slice().sort((a, b) => b.length - a.length).forEach(t => {
+    const safe = esc(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    out = out.replace(new RegExp("(" + safe + ")", "ig"), "<mark class=\"hit\">$1</mark>");
+  });
+  return out;
+}
+
+/* ============================================================ PUBLICATIONS */
+
+let PUB_INDEX = null;
+
+/* "IMO: ISM Code" -> publisher "IMO". Long entries have no colon and fall
+   back to Other, rather than being chopped at a colon deep in a sentence. */
+function publisherOf(name) {
+  const at = String(name).indexOf(":");
+  if (at > 0 && at <= 14) return String(name).slice(0, at).trim();
+  const first = String(name).split(" ")[0].replace(/[^A-Za-z/]/g, "");
+  return first && first.length <= 10 ? first : "Other";
+}
+
+function publicationIndex() {
+  if (PUB_INDEX) return PUB_INDEX;
+  const map = {};
+  QUESTIONS.forEach(q => {
+    (q.publications || []).forEach(raw => {
+      const name = String(raw || "").trim();
+      if (!name) return;
+      if (!map[name]) map[name] = { name: name, publisher: publisherOf(name), ids: [] };
+      if (map[name].ids.indexOf(q.id) === -1) map[name].ids.push(q.id);
+    });
+  });
+  PUB_INDEX = Object.keys(map).map(k => map[k]);
+  PUB_INDEX.forEach(p => p.ids.sort(cmpId));
+  PUB_INDEX.sort((a, b) => b.ids.length - a.ids.length || a.name.localeCompare(b.name));
+  return PUB_INDEX;
+}
+
+/* Only the publications needed by questions that apply to this vessel. */
+function publicationsForProfile(applicableOnly) {
+  const excl = excludedSections();
+  return publicationIndex().map(p => {
+    const ids = applicableOnly
+      ? p.ids.filter(id => BYID[id] && isApplicable(BYID[id], excl))
+      : p.ids.slice();
+    return { name: p.name, publisher: p.publisher, ids: ids };
+  }).filter(p => p.ids.length)
+    .sort((a, b) => b.ids.length - a.ids.length || a.name.localeCompare(b.name));
+}
+
+function publicationStats(applicableOnly) {
+  const list = publicationsForProfile(applicableOnly);
+  const byPublisher = {};
+  list.forEach(p => { byPublisher[p.publisher] = (byPublisher[p.publisher] || 0) + 1; });
+  return {
+    total: list.length,
+    single: list.filter(p => p.ids.length === 1).length,
+    publishers: Object.keys(byPublisher).sort((a, b) => byPublisher[b] - byPublisher[a]),
+    byPublisher: byPublisher
+  };
+}
+
+/* ============================================================================
+   Long-press quick status, sharing, and the backup reminder.
+   ========================================================================= */
+
+/* ----------------------------------------------------------- long press */
+
+const LONG_PRESS_MS = 480;
+const LONG_PRESS_SLOP = 12;      /* a scroll must not count as a press */
+
+let pressTimer = null;
+let pressStart = null;
+let pressQid = null;
+let suppressClick = false;
+
+function cancelPress() {
+  clearTimeout(pressTimer);
+  pressTimer = null;
+  pressStart = null;
+  pressQid = null;
+}
+
+function onRowPressStart(e) {
+  const row = e.target && e.target.closest ? e.target.closest(".qrow") : null;
+  if (!row || !row.dataset.qid) return;
+  if (selectMode) return;                       /* ticking rows is its own mode */
+
+  pressQid = row.dataset.qid;
+  pressStart = { x: e.clientX || 0, y: e.clientY || 0 };
+  clearTimeout(pressTimer);
+  pressTimer = setTimeout(() => {
+    const qid = pressQid;
+    cancelPress();
+    if (!qid) return;
+    suppressClick = true;
+    if (navigator.vibrate) { try { navigator.vibrate(12); } catch (err) { } }
+    openQuickSheet(qid);
+  }, LONG_PRESS_MS);
+}
+
+function onRowPressMove(e) {
+  if (!pressStart) return;
+  const dx = Math.abs((e.clientX || 0) - pressStart.x);
+  const dy = Math.abs((e.clientY || 0) - pressStart.y);
+  if (dx > LONG_PRESS_SLOP || dy > LONG_PRESS_SLOP) cancelPress();
+}
+
+function onRowPressEnd() {
+  cancelPress();
+}
+
+/* Set status and follow-up without leaving the list. */
+function openQuickSheet(qid) {
+  const q = BYID[qid];
+  if (!q) return;
+  const st = answerStatus(qid);
+
+  openSheet(
+    '<div class="tiny mono">' + esc(q.id) + "</div>" +
+    "<h2>" + esc(q.short) + "</h2>" +
+    '<div class="sub">Set it here, or open the question for the full text.</div>' +
+
+    '<label class="fl">Status</label>' +
+    '<div class="statusbar" id="qkStatus" style="margin-bottom:14px">' +
+      STATUSES.map(s => '<button class="' + s.k + '" data-qk="' + s.k + '" aria-pressed="' +
+        (s.k === st) + '">' + esc(s.short) + "</button>").join("") +
+    "</div>" +
+
+    '<label class="fl">Follow up with</label>' +
+    '<div class="chips roles" id="qkRoles">' + followChipsHTML(qid) + "</div>" +
+
+    '<div class="row" style="margin-top:16px">' +
+      '<button class="btn primary grow" id="qkOpen">Open question</button>' +
+      '<button class="btn ghost" id="qkClose">Done</button>' +
+    "</div>"
+  );
+
+  $$("#qkStatus button").forEach(b => {
+    b.onclick = () => {
+      setAnswer(qid, { status: b.dataset.qk });
+      $$("#qkStatus button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+      toast("Marked " + STATUS_LABEL[b.dataset.qk].toLowerCase());
+    };
+  });
+
+  $$("#qkRoles .chip[data-role]").forEach(b => {
+    b.onclick = () => {
+      const now = toggleFollowUp(qid, b.dataset.role);
+      b.setAttribute("aria-pressed", String(now.indexOf(b.dataset.role) !== -1));
+    };
+  });
+
+  $("#qkOpen").onclick = () => {
+    closeSheet();
+    detailQid = qid;
+    backTo = "library";
+    show("detail");
+  };
+  const done = () => { closeSheet(); renderQList(); };
+  $("#qkClose").onclick = done;
+  $("#sheet .scrim").onclick = done;
+}
+
+/* ================================================================ SHARE */
+
+function canShare() {
+  return typeof navigator !== "undefined" && typeof navigator.share === "function";
+}
+
+function dataURLtoFile(dataUrl, name) {
+  try {
+    const parts = String(dataUrl).split(",");
+    const mime = (parts[0].match(/data:([^;]+)/) || [])[1] || "application/octet-stream";
+    const bin = atob(parts[1]);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new File([arr], name, { type: mime });
+  } catch (e) { return null; }
+}
+
+function findingShareText(f) {
+  const c = activeCampaign();
+  const q = f.qid ? BYID[f.qid] : null;
+  const lines = [];
+  lines.push("SIRE 2.0 finding — " + ((c && c.vessel) || "vessel"));
+  lines.push("");
+  lines.push("[" + (SEV_LABEL[f.severity] || f.severity).toUpperCase() + "] " + f.title);
+  if (q) lines.push("Question " + f.qid + " — " + q.short);
+  const meta = [];
+  if (f.owner) meta.push(f.owner);
+  if (f.raisedAt) meta.push("raised " + String(f.raisedAt).slice(0, 10));
+  if (f.dueAt) meta.push("due " + f.dueAt);
+  meta.push(f.status === "closed" ? "closed" : "open");
+  lines.push(meta.join(" · "));
+  if (f.detail) { lines.push(""); lines.push(f.detail); }
+  if (f.closeNote) { lines.push(""); lines.push("Close-out: " + f.closeNote); }
+  return lines.join("\n");
+}
+
+function questionShareText(qid) {
+  const q = BYID[qid];
+  if (!q) return "";
+  const a = getAnswer(qid) || {};
+  const c = activeCampaign();
+  const lines = [];
+  lines.push("SIRE 2.0 " + q.id + " — " + ((c && c.vessel) || "vessel"));
+  lines.push("");
+  lines.push(q.short);
+  lines.push("");
+  lines.push(q.question);
+  lines.push("");
+  lines.push("Status: " + (STATUS_LABEL[answerStatus(qid)] || ""));
+  const fu = followUpOf(qid);
+  if (fu.length) lines.push("Follow up with: " + fu.join(", "));
+  if (a.owner) lines.push("Responsible: " + a.owner);
+  if (a.notes) { lines.push(""); lines.push("Notes: " + a.notes); }
+  return lines.join("\n");
+}
+
+/* Hand off to the phone's share sheet — WhatsApp, email, anything installed.
+   Falls back to the clipboard where there is no share sheet, which is the
+   case in the desktop shell. */
+async function shareText(text, title, photos) {
+  if (canShare()) {
+    const payload = { title: title || "SIRE 2.0 Prep", text: text };
+
+    if (photos && photos.length && navigator.canShare) {
+      const files = [];
+      for (const p of photos.slice(0, 6)) {
+        try {
+          const rec = await Media.get(p.id);
+          if (rec && rec.data) {
+            const f = dataURLtoFile(rec.data, (p.name || p.id) + ".jpg");
+            if (f) files.push(f);
+          }
+        } catch (e) { }
+      }
+      if (files.length && navigator.canShare({ files: files })) {
+        payload.files = files;
+      }
+    }
+
+    try {
+      await navigator.share(payload);
+      return "shared";
+    } catch (e) {
+      if (e && e.name === "AbortError") return "cancelled";
+    }
+  }
+
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      toast("Copied — paste it into the group");
+      return "copied";
+    }
+  } catch (e) { }
+
+  openSheet(
+    "<h2>Copy and send</h2>" +
+    '<div class="sub">This device has no share sheet, so copy the text below.</div>' +
+    '<div class="field"><textarea id="shText" style="min-height:220px">' + esc(text) + "</textarea></div>" +
+    '<button class="btn primary block" id="shClose">Done</button>'
+  );
+  const ta = $("#shText");
+  if (ta) { ta.focus(); ta.select(); }
+  $("#shClose").onclick = closeSheet;
+  $("#sheet .scrim").onclick = closeSheet;
+  return "manual";
+}
+
+/* ========================================================= BACKUP NUDGE */
+
+const NUDGE_INTERVALS = [
+  { d: 0,  label: "Never remind me" },
+  { d: 1,  label: "After a day" },
+  { d: 3,  label: "After three days" },
+  { d: 7,  label: "After a week" }
+];
+const DEFAULT_NUDGE_DAYS = 3;
+
+function nudgeDays() {
+  if (!STATE.settings) STATE.settings = {};
+  const v = STATE.settings.nudgeDays;
+  return v === undefined || v === null ? DEFAULT_NUDGE_DAYS : Number(v);
+}
+
+function setNudgeDays(d) {
+  STATE.settings.nudgeDays = Number(d);
+  STATE.settings.modified = nowISO();
+  markDirty();
+}
+
+function markExported() {
+  if (!STATE.settings) STATE.settings = {};
+  STATE.settings.lastExportAt = nowISO();
+  STATE.settings.nudgeSnoozedAt = "";
+  markDirty();
+}
+
+function snoozeNudge() {
+  STATE.settings.nudgeSnoozedAt = nowISO();
+  markDirty();
+}
+
+function daysBetween(a, b) {
+  const ta = Date.parse(a), tb = Date.parse(b);
+  if (isNaN(ta) || isNaN(tb)) return 0;
+  return Math.floor((tb - ta) / 86400000);
+}
+
+/* Returns null when there is nothing to say, otherwise why and for how long. */
+function backupNudge() {
+  const limit = nudgeDays();
+  if (!limit) return null;
+  if (!STATE.campaigns.length) return null;
+
+  const s = STATE.settings || {};
+  const now = nowISO();
+
+  /* a snooze holds for a day */
+  if (s.nudgeSnoozedAt && daysBetween(s.nudgeSnoozedAt, now) < 1) return null;
+
+  if (!s.lastExportAt) {
+    /* never exported: only nag once there is something worth losing */
+    const records = Object.keys(STATE.answers).length + Object.keys(STATE.findings).length;
+    if (records < 5) return null;
+    return { never: true, days: 0, records: records };
+  }
+
+  const days = daysBetween(s.lastExportAt, now);
+  if (days < limit) return null;
+
+  /* nothing has changed since the last backup, so there is nothing to save */
+  if (String(STATE.modified || "") <= String(s.lastExportAt)) return null;
+
+  return { never: false, days: days, records: Object.keys(STATE.answers).length };
+}
+
+/* ============================================================================
+   Days to inspection, and a readiness trend.
+
+   Desktop snapshots live in SQLite and the phone has none, so the trend keeps
+   its own record: one small sample per day per inspection, inside the state
+   blob. It syncs and merges like everything else.
+   ========================================================================= */
+
+const READINESS_KEEP = 200;
+
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function readinessKey(cid, day) {
+  return cid + "::" + day;
+}
+
+/* Called whenever the dashboard is drawn. One sample a day, overwritten as the
+   day goes on, so the trend reflects where you finished each day. */
+function recordReadiness() {
+  const c = activeCampaign();
+  if (!c) return null;
+  if (!STATE.readiness) STATE.readiness = {};
+
+  const t = tally(applicableQuestions());
+  const day = today();
+  const key = readinessKey(c.id, day);
+  const prev = STATE.readiness[key];
+
+  if (prev && prev.pct === t.pct && prev.ready === t.ready && prev.gap === t.gap) {
+    return prev;                                  /* nothing moved — leave it */
+  }
+
+  STATE.readiness[key] = {
+    id: key, campaign: c.id, day: day,
+    pct: t.pct, ready: t.ready, gap: t.gap, wip: t.wip, total: t.total,
+    modified: nowISO(), deleted: false
+  };
+
+  /* keep the file small on a long trip */
+  const keys = Object.keys(STATE.readiness).sort();
+  if (keys.length > READINESS_KEEP) {
+    keys.slice(0, keys.length - READINESS_KEEP).forEach(k => { delete STATE.readiness[k]; });
+  }
+
+  markDirty();
+  return STATE.readiness[key];
+}
+
+function readinessHistory(cid, days) {
+  const c = cid || STATE.activeCampaign;
+  if (!c || !STATE.readiness) return [];
+  const list = Object.keys(STATE.readiness)
+    .map(k => STATE.readiness[k])
+    .filter(r => r && !r.deleted && r.campaign === c)
+    .sort((a, b) => String(a.day).localeCompare(String(b.day)));
+  return days ? list.slice(-days) : list;
+}
+
+/* ------------------------------------------------------------ countdown */
+
+function daysUntil(dateStr) {
+  if (!dateStr) return null;
+  const then = Date.parse(String(dateStr).slice(0, 10) + "T00:00:00");
+  if (isNaN(then)) return null;
+  const now = new Date();
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  return Math.round((then - midnight) / 86400000);
+}
+
+function countdown() {
+  const c = activeCampaign();
+  if (!c || !c.plannedDate) return null;
+  const d = daysUntil(c.plannedDate);
+  if (d === null) return null;
+  return {
+    days: d,
+    date: c.plannedDate,
+    label: d > 1 ? d + " days to inspection"
+         : d === 1 ? "Inspection tomorrow"
+         : d === 0 ? "Inspection today"
+         : d === -1 ? "Inspection was yesterday"
+         : Math.abs(d) + " days since the inspection",
+    past: d < 0
+  };
+}
+
+/* --------------------------------------------------------------- trend */
+
+/* Progress per day, measured across the recorded history. */
+function readinessRate(cid) {
+  const hist = readinessHistory(cid);
+  if (hist.length < 2) return null;
+  const first = hist[0], last = hist[hist.length - 1];
+  const span = Math.max(1, daysBetween(first.day + "T00:00:00", last.day + "T00:00:00"));
+  const gained = last.pct - first.pct;
+  return {
+    perDay: gained / span,
+    from: first.pct, to: last.pct, days: span, samples: hist.length
+  };
+}
+
+/* Are you going to be ready in time? */
+function projection() {
+  const cd = countdown();
+  const rate = readinessRate();
+  const t = tally(applicableQuestions());
+
+  const remaining = t.total - t.done;
+  const out = {
+    remaining: remaining,
+    pct: t.pct,
+    days: cd ? cd.days : null,
+    perDayNeeded: null,
+    perDayActual: rate ? rate.perDay : null,
+    verdict: "unknown",
+    note: ""
+  };
+
+  if (!cd || cd.past || cd.days <= 0) {
+    out.verdict = remaining === 0 ? "done" : "nodate";
+    out.note = remaining === 0
+      ? "Everything applicable is ready or marked not applicable."
+      : remaining + " question" + (remaining === 1 ? "" : "s") + " still outstanding.";
+    return out;
+  }
+
+  out.perDayNeeded = remaining / cd.days;
+
+  if (remaining === 0) {
+    out.verdict = "done";
+    out.note = "Everything applicable is ready with " + cd.days + " day" +
+      (cd.days === 1 ? "" : "s") + " to spare.";
+    return out;
+  }
+
+  if (!rate || rate.samples < 3 || rate.perDay <= 0) {
+    out.verdict = "unknown";
+    out.note = "About " + Math.ceil(out.perDayNeeded) + " question" +
+      (Math.ceil(out.perDayNeeded) === 1 ? "" : "s") + " a day to finish in time." +
+      (rate ? "" : " A few more days of use and this will show whether you are on track.");
+    return out;
+  }
+
+  /* percentage points still to gain, against the rate actually achieved */
+  const ptsNeeded = 100 - t.pct;
+  const daysAtRate = ptsNeeded / rate.perDay;
+  out.daysAtRate = daysAtRate;
+
+  if (daysAtRate <= cd.days) {
+    out.verdict = "ontrack";
+    out.note = "At the current rate you finish in about " + Math.ceil(daysAtRate) +
+      " day" + (Math.ceil(daysAtRate) === 1 ? "" : "s") + ", inside the " + cd.days + " you have.";
+  } else {
+    out.verdict = "behind";
+    out.note = "At the current rate this takes about " + Math.ceil(daysAtRate) +
+      " days, but only " + cd.days + " remain. That is roughly " +
+      Math.ceil(out.perDayNeeded) + " question" +
+      (Math.ceil(out.perDayNeeded) === 1 ? "" : "s") + " a day from here.";
+  }
+  return out;
+}
+
+/* A small inline chart. No library, no canvas — it has to print and scale. */
+function sparklineSVG(hist, opts) {
+  const o = opts || {};
+  const w = o.width || 300, h = o.height || 64, pad = 4;
+  if (!hist || hist.length < 2) return "";
+
+  const xs = hist.length - 1;
+  const pt = (r, i) => {
+    const x = pad + (i / xs) * (w - pad * 2);
+    const y = h - pad - (Math.max(0, Math.min(100, r.pct)) / 100) * (h - pad * 2);
+    return x.toFixed(1) + "," + y.toFixed(1);
+  };
+
+  const line = hist.map(pt).join(" ");
+  const area = pad + "," + (h - pad) + " " + line + " " +
+    (pad + (w - pad * 2)).toFixed(1) + "," + (h - pad);
+  const last = hist[hist.length - 1];
+
+  return '<svg class="spark" viewBox="0 0 ' + w + " " + h + '" preserveAspectRatio="none" ' +
+    'role="img" aria-label="Readiness over the last ' + hist.length + ' days">' +
+    '<polygon points="' + area + '" fill="var(--accent-soft)"></polygon>' +
+    '<polyline points="' + line + '" fill="none" stroke="var(--accent)" ' +
+    'stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>' +
+    '<circle cx="' + (pad + (w - pad * 2)).toFixed(1) + '" cy="' +
+      (h - pad - (last.pct / 100) * (h - pad * 2)).toFixed(1) +
+      '" r="3" fill="var(--accent)"></circle>' +
+    "</svg>";
+}
+
+/* ============================================================ TEXT SIZE */
+/* Device-specific, like the theme: a phone held at arm's length on deck needs
+   a different size from a laptop, and syncing it between them helps nobody. */
+
+const TEXT_SCALES = [
+  { v: 1,    label: "Normal" },
+  { v: 1.15, label: "Large" },
+  { v: 1.3,  label: "Larger" },
+  { v: 1.45, label: "Largest" }
+];
+
+function textScale() {
+  try {
+    const v = parseFloat(localStorage.getItem(LS_PREFIX + "textScale"));
+    if (v && v >= 1 && v <= 2) return v;
+  } catch (e) { }
+  return 1;
+}
+
+function applyTextScale(v) {
+  const scale = Math.max(1, Math.min(2, Number(v) || 1));
+  document.documentElement.style.setProperty("--tscale", String(scale));
+  try { localStorage.setItem(LS_PREFIX + "textScale", String(scale)); } catch (e) { }
+  return scale;
+}
+
+function stepTextScale(dir) {
+  const cur = textScale();
+  let i = TEXT_SCALES.findIndex(s => Math.abs(s.v - cur) < 0.001);
+  if (i === -1) i = 0;
+  i = Math.max(0, Math.min(TEXT_SCALES.length - 1, i + dir));
+  applyTextScale(TEXT_SCALES[i].v);
+  return TEXT_SCALES[i];
+}
+
+/* ============================================================================
+   ROVIQ walk mode and bulk editing.
+
+   OCIMF tags each question with where the inspector will be standing, not with
+   the five ROVIQ phases. Walk mode therefore orders those locations into the
+   route an inspection actually follows: board, documents, bridge and cargo
+   control, accommodation, main deck, forward, aft, machinery, interviews.
+   ========================================================================= */
+
+const WALK_ORDER = [
+  { stage: "Approaching Vessel",          leg: "Boarding" },
+  { stage: "Pre-board",                   leg: "Boarding" },
+  { stage: "Documentation",               leg: "Opening and documents" },
+  { stage: "Bridge",                      leg: "Bridge and cargo control" },
+  { stage: "Cargo Control Room",          leg: "Bridge and cargo control" },
+  { stage: "Internal Accommodation",      leg: "Accommodation" },
+  { stage: "Emergency Headquarters",      leg: "Accommodation" },
+  { stage: "Main Deck",                   leg: "Main deck" },
+  { stage: "Cargo Manifold",              leg: "Main deck" },
+  { stage: "Exterior Decks",              leg: "Main deck" },
+  { stage: "Pumproom",                    leg: "Cargo spaces" },
+  { stage: "Compressor Room",             leg: "Cargo spaces" },
+  { stage: "Forecastle",                  leg: "Forward" },
+  { stage: "Bow Loading Area",            leg: "Forward" },
+  { stage: "Mooring Decks",               leg: "Mooring" },
+  { stage: "Aft Mooring Deck",            leg: "Mooring" },
+  { stage: "Lifeboat deck",               leg: "Aft and survival craft" },
+  { stage: "Steering Gear",               leg: "Aft and survival craft" },
+  { stage: "Chief Engineer's Office",     leg: "Machinery" },
+  { stage: "Engine Control Room",         leg: "Machinery" },
+  { stage: "Engine Room",                 leg: "Machinery" },
+  { stage: "Interview - Deck Officer",    leg: "Interviews" },
+  { stage: "Interview Senior Officer",    leg: "Interviews" },
+  { stage: "Interview - Engineer Officer", leg: "Interviews" },
+  { stage: "Interview - Electrician / ETO", leg: "Interviews" },
+  { stage: "Interview - Security Officer", leg: "Interviews" },
+  { stage: "Interview - Rating",          leg: "Interviews" },
+  { stage: "Interview - Deck Rating",     leg: "Interviews" },
+  { stage: "Interview - Engine Rating",   leg: "Interviews" },
+  { stage: "Interview - Galley Rating",   leg: "Interviews" },
+  { stage: "Anywhere",                    leg: "Anywhere on board" }
+];
+
+const WALK_INDEX = WALK_ORDER.reduce((o, w, i) => (o[w.stage] = i, o), {});
+
+function walkLegOf(stage) {
+  const w = WALK_ORDER.find(x => x.stage === stage);
+  return w ? w.leg : "Other";
+}
+
+/* Group a list of questions by ROVIQ stage, in walking order. A question
+   tagged with several locations appears under each of them — that is how the
+   inspection works, and hiding the repeats would lose the point. */
+function walkGroups(list) {
+  const byStage = {};
+  list.forEach(q => {
+    const stages = (q.roviq && q.roviq.length) ? q.roviq : ["Anywhere"];
+    stages.forEach(s => { (byStage[s] = byStage[s] || []).push(q); });
+  });
+
+  return Object.keys(byStage)
+    .sort((a, b) => {
+      const ia = WALK_INDEX[a] === undefined ? 999 : WALK_INDEX[a];
+      const ib = WALK_INDEX[b] === undefined ? 999 : WALK_INDEX[b];
+      return ia - ib || a.localeCompare(b);
+    })
+    .map(stage => ({
+      stage: stage,
+      leg: walkLegOf(stage),
+      questions: byStage[stage].sort((a, b) => cmpId(a.id, b.id))
+    }));
+}
+
+/* ============================================================ BULK EDIT */
+
+let selectMode = false;
+const selected = {};
+
+function selectedIds() {
+  return Object.keys(selected).filter(k => selected[k]);
+}
+
+function selectedCount() {
+  return selectedIds().length;
+}
+
+function clearSelection() {
+  Object.keys(selected).forEach(k => { delete selected[k]; });
+}
+
+function toggleSelected(qid) {
+  if (selected[qid]) delete selected[qid];
+  else selected[qid] = true;
+  return !!selected[qid];
+}
+
+function bulkStatus(status) {
+  const ids = selectedIds();
+  ids.forEach(qid => setAnswer(qid, { status: status }));
+  return ids.length;
+}
+
+/* mode: "add" | "remove" */
+function bulkFollow(role, mode) {
+  const ids = selectedIds();
+  ids.forEach(qid => {
+    const cur = followUpOf(qid).slice();
+    const at = cur.indexOf(role);
+    if (mode === "remove") { if (at !== -1) cur.splice(at, 1); }
+    else if (at === -1) cur.push(role);
+    setAnswer(qid, { followUp: cur });
+  });
+  return ids.length;
+}
+
+function bulkClearFollow() {
+  const ids = selectedIds();
+  ids.forEach(qid => setAnswer(qid, { followUp: [] }));
+  return ids.length;
+}
+
+function bulkOwner(owner) {
+  const ids = selectedIds();
+  ids.forEach(qid => setAnswer(qid, { owner: owner }));
+  return ids.length;
+}
+
+
+/* ============================================================================
+   Interview stages — the questions an inspector puts to a person, rather than
+   to the ship. Each is turned into a one-sheet that person can be handed.
+   ========================================================================= */
+
+const INTERVIEW_STAGES = [
+  { stage: "Interview Senior Officer",     who: "Master, C/O, C/E" },
+  { stage: "Interview - Deck Officer",     who: "C/O, 2/O, 3/O" },
+  { stage: "Interview - Engineer Officer", who: "C/E, 2/E" },
+  { stage: "Interview - Electrician / ETO", who: "ETO or electrician" },
+  { stage: "Interview - Security Officer", who: "SSO" },
+  { stage: "Interview - Rating",           who: "Any rating" },
+  { stage: "Interview - Deck Rating",      who: "Bosun, pumpman, deck ratings" },
+  { stage: "Interview - Engine Rating",    who: "Engine ratings" },
+  { stage: "Interview - Galley Rating",    who: "Cook, messman" }
+];
+
+const INTERVIEW_KEYS = INTERVIEW_STAGES.map(s => s.stage);
+
+function interviewWho(stage) {
+  const hit = INTERVIEW_STAGES.find(s => s.stage === stage);
+  return hit ? hit.who : "";
+}
+
+/* Questions for one interview stage, applicable to this vessel. */
+function interviewQuestions(stage, opts) {
+  const o = opts || {};
+  const excl = excludedSections();
+  return QUESTIONS
+    .filter(q => (q.roviq || []).indexOf(stage) !== -1)
+    .filter(q => isApplicable(q, excl))
+    .filter(q => !(o.hideNotApplicable && answerStatus(q.id) === "na"))
+    .sort((a, b) => cmpId(a.id, b.id));
+}
+
+function interviewCounts(opts) {
+  const out = {};
+  INTERVIEW_KEYS.forEach(k => { out[k] = interviewQuestions(k, opts).length; });
+  return out;
+}
+
+/* ============================================================================
    Back button / back gesture.
 
    A standalone PWA sits on a single history entry, so Android's back gesture
@@ -13650,6 +15259,23 @@ function wire() {
   $("#btnCampaign").onclick = () => show("settings");
   $$("[data-sheet-close]").forEach(el => el.onclick = closeSheet);
 
+  const list = $("#qList");
+  if (list) {
+    list.addEventListener("pointerdown", onRowPressStart);
+    list.addEventListener("pointermove", onRowPressMove);
+    list.addEventListener("pointerup", onRowPressEnd);
+    list.addEventListener("pointercancel", onRowPressEnd);
+    list.addEventListener("pointerleave", onRowPressEnd);
+    list.addEventListener("contextmenu", e => {
+      const row = e.target.closest ? e.target.closest(".qrow") : null;
+      if (!row || selectMode) return;
+      e.preventDefault();
+      cancelPress();
+      openQuickSheet(row.dataset.qid);
+    });
+  }
+  window.addEventListener("scroll", onRowPressEnd, { passive: true });
+
   document.addEventListener("keydown", onShortcutKey);
   document.addEventListener("keydown", e => {
     if (e.key === "Escape" && !capturingFor) { closeSheet(); hideMarkBar(); }
@@ -13670,11 +15296,19 @@ function openMoreSheet() {
   openSheet(
     '<h2>More</h2>' +
     '<button class="btn block primary" data-more="reports" style="margin-bottom:9px">Reports</button>' +
+    '<button class="btn block" data-more="publications" style="margin-bottom:9px">Publications</button>' +
     '<button class="btn block" data-more="particulars" style="margin-bottom:9px">Vessel particulars</button>' +
     '<button class="btn block" data-more="profile" style="margin-bottom:9px">Vessel profile</button>' +
     '<button class="btn block" data-more="settings" style="margin-bottom:9px">Settings</button>' +
+    '<div class="tsize-row" style="margin-bottom:9px">' +
+      '<button class="btn" id="moreTsDown">A−</button>' +
+      '<span class="tsize-demo" style="text-align:center">Text size</span>' +
+      '<button class="btn" id="moreTsUp">A+</button>' +
+    "</div>" +
     '<button class="btn ghost block" data-more="__close">Close</button>'
   );
+  $("#moreTsUp").onclick = () => { toast(stepTextScale(1).label); };
+  $("#moreTsDown").onclick = () => { toast(stepTextScale(-1).label); };
   $$("#sheetPanel [data-more]").forEach(b => {
     b.onclick = () => {
       closeSheet();
@@ -13717,9 +15351,11 @@ async function boot() {
   const meta = $("#metaThemeColor");
   if (meta) meta.setAttribute("content", THEME_BG[theme]);
   applyTitlebar(theme);
+  applyTextScale(textScale());
 
   wire();
   wireReports();
+  wirePublications();
   initBackHandling();
   show("dashboard");
   initPWA();

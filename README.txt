@@ -48,6 +48,68 @@ to that list under Settings; removing a role there never clears it from
 questions it is already set on. The "Follow-up by role" report prints a
 separate section per person.
 
+Library: walk mode and bulk edit
+--------------------------------
+"ROVIQ walk" reorders the library into the route an inspector takes -
+boarding, documents, bridge and cargo control, accommodation, main deck,
+forward, mooring, aft, machinery, then interviews. A question tagged with
+several locations appears at each of them, which is how it is inspected.
+
+"Select" turns on tick boxes. Choose several questions, or "All shown"
+to take everything matching the current filters, then set status,
+follow-up roles or the responsible person on all of them at once.
+
+Search and publications
+-----------------------
+The library search covers the whole OCIMF text - objective, guidance,
+inspector actions, expected evidence and negative-observation grounds -
+not just the question titles. Matching rows show a snippet with the term
+highlighted and name the field it came from. Put a phrase in quotes to
+search it as a phrase. "Search all text" can be switched off to search
+titles only.
+
+More -> Publications inverts the library: every publication the questions
+rest on, with how many questions need each, narrowed to the ones that
+apply to your vessel. Tap Show to see those questions, or tap a
+publication on any question to do the same. There is a matching report
+for gathering paperwork before an inspection.
+
+Quick status, sharing and backup reminders
+------------------------------------------
+Press and hold a row in the library (right-click on a computer) to set
+status and follow-up without opening the question.
+
+"Share" on a question or a finding hands it to the phone's share sheet -
+WhatsApp, email, anything installed - with its photos attached where the
+platform allows. On a computer there is no share sheet, so it copies the
+text to the clipboard instead.
+
+The dashboard reminds you to export a backup when there are changes that
+have never been saved out. Change the interval, or switch it off, under
+Settings -> Export and import.
+
+Text size and the countdown
+---------------------------
+Settings -> Appearance has a text size control, and More has A- / A+ for
+adjusting it on deck without digging. It scales the text you read, not
+the buttons and navigation, so nothing breaks at the largest setting.
+Printed reports keep their own typography either way. The size is stored
+per device and is deliberately not synced.
+
+Give an inspection a planned date and the dashboard counts down to it,
+draws a readiness trend from a daily sample, and says whether the rate
+you are actually working at will get you there in time.
+
+Interview prep packs
+--------------------
+The OCIMF library marks which questions an inspector puts to a person
+rather than to the ship - nine interviews in all, from Senior Officer
+down to Galley Rating. Reports -> Interview prep packs prints one sheet
+per interview, written for the person being asked: what you may be
+asked, what to have ready as a tick list, and what would read badly.
+Pick which interviews to print, and use the short version to leave out
+the negative-observation grounds.
+
 Notes
 -----
   * The manifest deliberately uses the .json extension. GitHub Pages
