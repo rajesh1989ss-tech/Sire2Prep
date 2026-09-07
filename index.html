@@ -339,14 +339,18 @@ table.grid tbody tr:nth-child(even) { background:var(--surface2) }
 .an-u { text-decoration:underline; text-decoration-thickness:2px; text-underline-offset:3px }
 
 .mark-bar {
-  position:fixed; left:50%; transform:translateX(-50%) translateY(10px);
-  bottom:calc(84px + env(safe-area-inset-bottom));
-  z-index:60; opacity:0; pointer-events:none; transition:opacity .14s, transform .14s;
+  position:fixed; z-index:60; opacity:0; pointer-events:none;
+  transition:opacity .12s;
   background:var(--surface); border:1px solid var(--line-strong);
   border-radius:999px; box-shadow:var(--shadow-lg); padding:7px 10px;
   -webkit-user-select:none; user-select:none;
 }
-.mark-bar.on { opacity:1; pointer-events:auto; transform:translateX(-50%) translateY(0) }
+.mark-bar.on { opacity:1; pointer-events:auto }
+/* fallback position when the selection rectangle cannot be measured */
+.mark-bar.docked {
+  left:50%; transform:translateX(-50%);
+  bottom:calc(84px + env(safe-area-inset-bottom)); top:auto;
+}
 .mark-bar .mb-inner { display:flex; align-items:center; gap:7px }
 .mark-bar button {
   border:1px solid var(--line-strong); background:var(--bg); color:var(--text);
@@ -369,6 +373,17 @@ table.grid tbody tr:nth-child(even) { background:var(--surface2) }
   }
   .mark-bar { display:none !important }
 }
+
+/* selection menu + links */
+.selquote {
+  border-left:3px solid var(--accent); padding:7px 11px; margin:4px 0 6px;
+  background:var(--surface2); border-radius:0 var(--r-sm) var(--r-sm) 0;
+  font-size:14.5px; line-height:1.5; overflow-wrap:anywhere;
+}
+.menu-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px }
+@media (max-width:420px) { .menu-grid { grid-template-columns:1fr } }
+.menu-grid .btn { margin:0 }
+.lk-host { margin-top:2px }
 
 /* search hits + publications */
 .qrow .snip {
@@ -937,6 +952,22 @@ table.rt td.mono { font-family: "Cascadia Mono", Consolas, monospace; white-spac
       </div>
       <div id="prCard"></div>
     </div>
+  </section>
+
+  <!-- ======================================================== LINKS ==== -->
+  <section class="view hidden" id="v-links">
+    <div class="card">
+      <h2>Links</h2>
+      <div class="sub">Folders and web pages you have tied to the library, so the supporting material is one tap away.</div>
+      <div id="linkHead"></div>
+      <div class="chips" id="linkFilters">
+        <button class="chip" data-lk="all" aria-pressed="true">All</button>
+        <button class="chip" data-lk="folder">Folders</button>
+        <button class="chip" data-lk="shelf">In the app</button>
+        <button class="chip" data-lk="url">Web pages</button>
+      </div>
+    </div>
+    <div id="linkList"></div>
   </section>
 
   <!-- ================================================= PUBLICATIONS ==== -->
@@ -8917,6 +8948,7 @@ function blankState() {
     practice: {},       /* Leitner boxes, global rather than per ship */
     annotations: {},    /* highlights and text styling over the library */
     readiness: {},      /* one sample a day, for the trend line             */
+    links: {},          /* folders and web pages tied to a piece of text    */
     settings: { theme: "light" },
     modified: nowISO()
   };
@@ -9320,9 +9352,11 @@ async function attachPhotos(files, target) {
   }
   if (!added.length) return [];
 
-  if (target.kind === "finding") {
-    const f = STATE.findings[target.id];
-    if (f) { f.photos = (f.photos || []).concat(added); f.modified = nowISO(); markDirty(); }
+  const rec = targetRecord(target);
+  if (rec) {
+    rec.photos = (rec.photos || []).concat(added);
+    rec.modified = nowISO();
+    markDirty();
   } else {
     const a = getAnswer(target.id) || setAnswer(target.id, {});
     setAnswer(target.id, { photos: (a.photos || []).concat(added) });
@@ -9331,11 +9365,10 @@ async function attachPhotos(files, target) {
 }
 
 async function removePhoto(target, photoId) {
-  if (target.kind === "finding") {
-    const f = STATE.findings[target.id];
-    if (!f) return;
-    f.photos = (f.photos || []).filter(p => p.id !== photoId);
-    f.modified = nowISO();
+  const rec = targetRecord(target);
+  if (rec) {
+    rec.photos = (rec.photos || []).filter(p => p.id !== photoId);
+    rec.modified = nowISO();
     markDirty();
   } else {
     const a = getAnswer(target.id);
@@ -9572,11 +9605,15 @@ function readFileAsDataURL(file) {
   });
 }
 
+function targetRecord(target) {
+  if (target.kind === "finding") return (STATE.findings || {})[target.id] || null;
+  if (target.kind === "link") return (STATE.links || {})[target.id] || null;
+  return null;
+}
+
 function targetFiles(target) {
-  if (target.kind === "finding") {
-    const f = STATE.findings[target.id];
-    return (f && f.files) || [];
-  }
+  const rec = targetRecord(target);
+  if (rec) return rec.files || [];
   const a = getAnswer(target.id);
   return (a && a.files) || [];
 }
@@ -9608,9 +9645,11 @@ async function attachFiles(files, target) {
   }
   if (!added.length) return [];
 
-  if (target.kind === "finding") {
-    const f = STATE.findings[target.id];
-    if (f) { f.files = (f.files || []).concat(added); f.modified = nowISO(); markDirty(); }
+  const rec = targetRecord(target);
+  if (rec) {
+    rec.files = (rec.files || []).concat(added);
+    rec.modified = nowISO();
+    markDirty();
   } else {
     const a = getAnswer(target.id) || setAnswer(target.id, {});
     setAnswer(target.id, { files: (a.files || []).concat(added) });
@@ -9619,11 +9658,10 @@ async function attachFiles(files, target) {
 }
 
 async function removeFile(target, fileId) {
-  if (target.kind === "finding") {
-    const f = STATE.findings[target.id];
-    if (!f) return;
-    f.files = (f.files || []).filter(x => x.id !== fileId);
-    f.modified = nowISO();
+  const rec = targetRecord(target);
+  if (rec) {
+    rec.files = (rec.files || []).filter(x => x.id !== fileId);
+    rec.modified = nowISO();
     markDirty();
   } else {
     const a = getAnswer(target.id);
@@ -10103,13 +10141,15 @@ function markActionLabel(action) {
    ========================================================================= */
 
 const VIEWS = ["dashboard", "library", "detail", "findings", "practice",
-               "reports", "publications", "particulars", "profile", "settings"];
+               "reports", "publications", "links", "particulars", "profile", "settings"];
 let currentView = "dashboard";
 let detailQid = null;
 let backTo = "library";
 
 function show(view, opts) {
   if (VIEWS.indexOf(view) === -1) view = "dashboard";
+  /* note where we were before anything moves */
+  if (typeof captureScroll === "function" && !(opts && opts.fromPop)) captureScroll();
   currentView = view;
   VIEWS.forEach(v => {
     const el = document.getElementById("v-" + v);
@@ -10122,8 +10162,10 @@ function show(view, opts) {
     if (on) b.setAttribute("aria-current", "page");
     else b.removeAttribute("aria-current");
   });
-  window.scrollTo(0, (opts && opts.keepScroll) ? window.scrollY : 0);
   render(view);
+  const back = opts && typeof opts.scrollTo === "number" ? opts.scrollTo : null;
+  if (back !== null) window.scrollTo(0, back);
+  else if (!(opts && opts.keepScroll)) window.scrollTo(0, 0);
   if (typeof recordNav === "function") recordNav(view, opts);
 }
 
@@ -10136,6 +10178,7 @@ function render(view) {
   if (view === "practice")    renderPractice();
   if (view === "reports")     renderReports();
   if (view === "publications") renderPublications();
+  if (view === "links")       renderLinks();
   if (view === "particulars") renderParticulars();
   if (view === "profile")     renderProfile();
   if (view === "settings")    renderSettings();
@@ -10708,6 +10751,12 @@ function renderDetail() {
     '</div>' +
 
     '<div class="card">' +
+      '<div class="spread mb"><h2 style="margin:0">Links</h2>' +
+        '<button class="btn sm" id="dAddLink">Add link</button></div>' +
+      '<div id="dLinks"></div>' +
+    '</div>' +
+
+    '<div class="card">' +
       '<div class="spread mb"><h2 style="margin:0">Findings</h2>' +
         '<button class="btn sm" id="dAddFinding">Raise finding</button></div>' +
       '<div id="dFindings"></div>' +
@@ -10754,6 +10803,13 @@ function renderDetail() {
       show("library");
     };
   });
+
+  renderLinkList($("#dLinks"), linksFor(q.id));
+  $("#dAddLink").onclick = () => {
+    menuText = q.short;
+    menuQid = q.id;
+    openSelectionMenu2(q.id);
+  };
 
   $("#dAddFinding").onclick = () => openFindingSheet(null, q.id);
   const linked = findingsFor().filter(f => f.qid === q.id);
@@ -11496,6 +11552,7 @@ function markBarHTML() {
     '<button class="mb-u" data-style="an-u" title="Underline" aria-label="Underline">U</button>' +
     '<span class="mb-sep"></span>' +
     '<button class="mb-x" data-erase="1" title="Remove marks" aria-label="Remove marks">Erase</button>' +
+    '<button class="mb-x" data-more="1" title="More actions" aria-label="More actions">⋯</button>' +
   "</div>";
 }
 
@@ -11519,8 +11576,48 @@ function showMarkBar(ranges) {
     const x = $("#markBar [data-erase]");
     x.addEventListener("mousedown", e => e.preventDefault());
     x.onclick = () => applyMark(null);
+
+    const m = $("#markBar [data-more]");
+    m.addEventListener("mousedown", e => e.preventDefault());
+    m.onclick = () => openSelectionMenu();
   }
   bar.classList.add("on");
+  placeMarkBar();
+}
+
+/* Put the toolbar against the selection rather than at the foot of the
+   screen, so the colour you want is under your thumb. */
+function placeMarkBar() {
+  const bar = $("#markBar");
+  if (!bar) return;
+
+  let rect = null;
+  try {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount) {
+      const r = sel.getRangeAt(0).getBoundingClientRect();
+      if (r && (r.width || r.height)) rect = r;
+    }
+  } catch (e) { }
+
+  if (!rect) { bar.classList.add("docked"); bar.style.left = ""; bar.style.top = ""; return; }
+  bar.classList.remove("docked");
+
+  const bw = bar.offsetWidth || 300;
+  const bh = bar.offsetHeight || 48;
+  const vw = window.innerWidth || 360;
+  const vh = window.innerHeight || 640;
+  const gap = 10;
+
+  let left = rect.left + rect.width / 2 - bw / 2;
+  left = Math.max(8, Math.min(left, vw - bw - 8));
+
+  let top = rect.top - bh - gap;                 /* above the selection */
+  if (top < 8) top = rect.bottom + gap;          /* no room, go below */
+  top = Math.max(8, Math.min(top, vh - bh - 8));
+
+  bar.style.left = Math.round(left) + "px";
+  bar.style.top = Math.round(top) + "px";
 }
 
 function applyMark(style) {
@@ -11571,6 +11668,7 @@ const REPORTS = [
   { k: "marks",       title: "Highlights & marked text",  desc: "Only the passages you have marked, filtered by colour or emphasis." },
   { k: "followup",    title: "Follow-up by role",          desc: "A separate section for each person, listing what they need to close out." },
   { k: "publications", title: "Publications to have ready", desc: "Every publication the questions rest on, and which questions need each." },
+  { k: "links",       title: "Linked material",             desc: "Every folder and web page you have tied to the library, and where it hangs." },
   { k: "interview",   title: "Interview prep packs",        desc: "A one-sheet per rank: what the inspector will ask that person, and what to have ready." }
 ];
 
@@ -12096,6 +12194,90 @@ function markedItems(opts) {
   return items;
 }
 
+function linkItems(opts) {
+  const items = [];
+  const list = allLinks();
+
+  const counts = {
+    folder: list.filter(l => l.kind === "folder").length,
+    shelf: list.filter(l => l.kind === "shelf").length,
+    url: list.filter(l => l.kind === "url").length
+  };
+  const files = list.reduce((n, l) => n + (l.files || []).length + (l.photos || []).length, 0);
+
+  const head = el("div");
+  head.innerHTML =
+    "<h2>Linked material</h2>" +
+    '<p class="lead">' + list.length + " link" + (list.length === 1 ? "" : "s") +
+    " across the library, holding " + files + " file" + (files === 1 ? "" : "s") + ".</p>" +
+    '<table class="kv">' +
+      "<tr><th>Folders on the computer</th><td>" + counts.folder + "</td></tr>" +
+      "<tr><th>Folders inside the app</th><td>" + counts.shelf + "</td></tr>" +
+      "<tr><th>Web pages</th><td>" + counts.url + "</td></tr>" +
+    "</table>" +
+    '<div class="callout">Paths are printed in full so the material can be found ' +
+    "from another machine, or from the stick itself.</div>";
+  items.push({ type: "el", node: head, newPage: true });
+
+  if (!list.length) {
+    items.push({ type: "el", node: el("p", "muted", "Nothing has been linked yet.") });
+    return items;
+  }
+
+  /* grouped by question, in library order, so it reads alongside the prep */
+  const byQ = {};
+  list.forEach(l => { (byQ[l.qid || ""] = byQ[l.qid || ""] || []).push(l); });
+  const ids = Object.keys(byQ).sort(cmpId);
+
+  items.push({
+    type: "table",
+    caption: "Everything linked",
+    head: "<tr><th>Question</th><th>Link</th><th>Kind</th><th>Where it points</th><th>Files</th></tr>",
+    rows: ids.reduce((rows, qid) => {
+      byQ[qid].forEach(l => {
+        const kind = LINK_KINDS[l.kind] || LINK_KINDS.shelf;
+        const n = (l.files || []).length + (l.photos || []).length;
+        rows.push('<td class="mono">' + esc(qid || "—") + "</td>" +
+          "<td>" + esc(l.label) + "</td>" +
+          "<td>" + esc(kind.label) + "</td>" +
+          '<td class="mono" style="font-size:9pt">' +
+            esc(l.target || "inside the app") + "</td>" +
+          '<td class="num">' + (n || "—") + "</td>");
+      });
+      return rows;
+    }, [])
+  });
+
+  /* then the contents of anything holding files */
+  const withFiles = list.filter(l => (l.files || []).length || (l.photos || []).length);
+  if (withFiles.length) {
+    const h = el("div");
+    h.innerHTML = "<h2>What each link holds</h2>";
+    items.push({ type: "el", node: h, newPage: true });
+
+    withFiles.forEach(l => {
+      const q = l.qid ? BYID[l.qid] : null;
+      const card = el("div", "qcard");
+      card.innerHTML =
+        '<div class="qid">' + esc(l.qid || "—") + (q ? " · " + esc(q.short) : "") + "</div>" +
+        '<div class="qh">' + esc(l.label) + "</div>" +
+        '<div class="qmeta">' + esc((LINK_KINDS[l.kind] || LINK_KINDS.shelf).label) +
+          (l.target ? " · " + esc(l.target) : "") + "</div>" +
+        ((l.files || []).length
+          ? "<h4>Files</h4><ul>" + l.files.map(f =>
+              "<li>" + esc(f.name) + " (" + esc(fmtSize(f.bytes)) + ")</li>").join("") + "</ul>"
+          : "") +
+        ((l.photos || []).length
+          ? "<h4>Photographs</h4><p>" + l.photos.length + " image" +
+            (l.photos.length === 1 ? "" : "s") + "</p>"
+          : "");
+      items.push({ type: "el", node: card });
+    });
+  }
+
+  return items;
+}
+
 function publicationItems(opts) {
   const items = [];
   const list = publicationsForProfile(opts.hideNotApplicable !== false);
@@ -12341,6 +12523,8 @@ async function buildReportItems(opts) {
     items = items.concat(publicationItems(opts));
   } else if (opts.kind === "interview") {
     items = items.concat(interviewItems(opts));
+  } else if (opts.kind === "links") {
+    items = items.concat(linkItems(opts));
   } else if (opts.kind === "interview") {
     items = items.concat(interviewItems(opts));
   }
@@ -12806,7 +12990,7 @@ function wireReports() {
 
 const EXPORT_KIND = "backup";
 const RECORD_MAPS = ["answers", "particulars", "profiles", "findings", "practice",
-                     "annotations", "readiness"];
+                     "annotations", "readiness", "links"];
 
 function deviceId() {
   let d = null;
@@ -12830,6 +13014,7 @@ function collectPhotoIds() {
   };
   Object.keys(STATE.findings).forEach(k => take(STATE.findings[k]));
   Object.keys(STATE.answers).forEach(k => take(STATE.answers[k]));
+  Object.keys(STATE.links || {}).forEach(k => take(STATE.links[k]));
   return ids.filter((v, i, a) => a.indexOf(v) === i);
 }
 
@@ -12852,6 +13037,7 @@ async function buildExport(withMedia) {
       practice: STATE.practice,
       annotations: STATE.annotations,
       readiness: STATE.readiness,
+      links: STATE.links,
       settings: STATE.settings
     }
   };
@@ -14941,6 +15127,544 @@ function stepTextScale(dir) {
 }
 
 /* ============================================================================
+   Links, and what you can do with a piece of selected text.
+
+   A link ties a phrase in the library to somewhere the supporting material
+   lives. On the desktop that can be a real folder beside the exe, or one you
+   pick. On a phone there is no filesystem to point at, so the same link holds
+   its files inside the app instead — which is why every link can carry
+   attachments regardless of where it points.
+   ========================================================================= */
+
+const LINK_KINDS = {
+  folder: { label: "Folder", icon: "DIR" },
+  url:    { label: "Web page", icon: "WEB" },
+  shelf:  { label: "In-app folder", icon: "APP" }
+};
+
+function linksFor(qid) {
+  if (!STATE.links) STATE.links = {};
+  return Object.keys(STATE.links)
+    .map(k => STATE.links[k])
+    .filter(l => l && !l.deleted && (!qid || l.qid === qid))
+    .sort((a, b) => String(a.created).localeCompare(String(b.created)));
+}
+
+function allLinks() {
+  return linksFor(null);
+}
+
+function createLink(fields) {
+  if (!STATE.links) STATE.links = {};
+  const l = Object.assign({
+    id: uid("lnk"),
+    qid: "",
+    label: "",
+    kind: "shelf",
+    target: "",
+    note: "",
+    files: [],
+    created: nowISO(),
+    modified: nowISO(),
+    deleted: false
+  }, fields || {});
+  if (!l.label) l.label = l.target || "Link";
+  STATE.links[l.id] = l;
+  markDirty();
+  return l;
+}
+
+function updateLink(id, fields) {
+  const l = STATE.links && STATE.links[id];
+  if (!l) return null;
+  Object.assign(l, fields, { modified: nowISO() });
+  markDirty();
+  return l;
+}
+
+async function deleteLink(id) {
+  const l = STATE.links && STATE.links[id];
+  if (!l) return;
+  for (const f of (l.files || [])) await Media.del(f.id);
+  l.files = [];
+  l.deleted = true;
+  l.modified = nowISO();
+  markDirty();
+}
+
+function linkCount(qid) {
+  return linksFor(qid).length;
+}
+
+/* A folder name from selected text: trimmed to something a filesystem will
+   take, without cutting a word in half. */
+function folderNameFrom(text, max) {
+  const limit = max || 90;
+  let t = String(text || "").replace(/[<>:"/\\|?*\u0000-\u001f]/g, " ");
+  t = t.replace(/\s+/g, " ").trim().replace(/^[. ]+|[. ]+$/g, "");
+  if (!t) return "Link";
+  if (t.length > limit) {
+    const cut = t.slice(0, limit);
+    const at = cut.lastIndexOf(" ");
+    t = (at > limit * 0.5 ? cut.slice(0, at) : cut).replace(/[. ]+$/, "");
+  }
+  return t || "Link";
+}
+
+function deskHasLinks() {
+  return !!(DESK && typeof DESK.create_link_folder === "function");
+}
+
+/* ------------------------------------------------------------- actions */
+
+async function linkToNewFolder(qid, text, customName) {
+  const name = folderNameFrom(customName || text);
+
+  if (deskHasLinks()) {
+    try {
+      const r = await DESK.create_link_folder(name);
+      if (r && r.ok) {
+        const l = createLink({ qid: qid, label: r.name || name, kind: "folder", target: r.path });
+        toast("Folder created");
+        return l;
+      }
+      toast((r && r.error) || "Could not create the folder");
+      return null;
+    } catch (e) {
+      toast("Could not create the folder");
+      return null;
+    }
+  }
+
+  /* no filesystem here — the link holds its files inside the app */
+  const l = createLink({ qid: qid, label: name, kind: "shelf", target: "" });
+  toast("Folder created in the app — attach files to it");
+  return l;
+}
+
+async function linkToExistingFolder(qid) {
+  if (!deskHasLinks() || typeof DESK.pick_folder !== "function") {
+    toast("Picking a folder needs the desktop app.");
+    return null;
+  }
+  try {
+    const r = await DESK.pick_folder();
+    if (!r || !r.ok) return null;
+    return createLink({ qid: qid, label: r.name || r.path, kind: "folder", target: r.path });
+  } catch (e) {
+    toast("Could not open the folder picker");
+    return null;
+  }
+}
+
+function normaliseURL(raw) {
+  let u = String(raw || "").trim();
+  if (!u) return "";
+  if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+  try {
+    const parsed = new URL(u);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
+    return parsed.href;
+  } catch (e) { return ""; }
+}
+
+/* Opening has to leave the webview: a popup is blocked in the desktop shell,
+   so the shell hands the address to the system browser instead. */
+async function openExternal(url) {
+  const u = normaliseURL(url);
+  if (!u) { toast("That does not look like a web address."); return false; }
+
+  if (DESK && typeof DESK.open_external === "function") {
+    try {
+      const r = await DESK.open_external(u);
+      if (r && r.ok) return true;
+      toast((r && r.error) || "Could not open that address");
+      return false;
+    } catch (e) { /* fall through */ }
+  }
+
+  try {
+    const a = document.createElement("a");
+    a.href = u;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => a.remove(), 1000);
+    return true;
+  } catch (e) {
+    toast("Could not open that address");
+    return false;
+  }
+}
+
+async function openLink(l) {
+  if (!l) return false;
+  if (l.kind === "url") return openExternal(l.target);
+  if (l.kind === "folder") {
+    if (DESK && typeof DESK.open_path === "function") {
+      try {
+        const r = await DESK.open_path(l.target);
+        if (r && r.ok) return true;
+        toast((r && r.error) || "Could not open that folder");
+        return false;
+      } catch (e) { }
+    }
+    toast("That folder is on the computer — open it from the desktop app.");
+    return false;
+  }
+  return false;                       /* a shelf is opened inside the app */
+}
+
+function webSearchURL(text) {
+  return "https://duckduckgo.com/?q=" + encodeURIComponent(String(text || "").slice(0, 300));
+}
+
+/* ============================================================================
+   What you can do with a selection — the ⋯ button and right-click
+   ========================================================================= */
+
+let menuText = "";
+let menuQid = "";
+
+function openSelectionMenu() {
+  const ranges = markBarRanges.length ? markBarRanges : selectionRanges();
+  const text = ranges.map(r => r.text).join(" ").trim();
+  const q = BYID[detailQid];
+  if (!text || !q) { hideMarkBar(); return; }
+
+  menuText = text;
+  menuQid = q.id;
+  const short = text.length > 70 ? text.slice(0, 70) + "…" : text;
+  const desktop = deskHasLinks();
+
+  hideMarkBar();
+  openSheet(
+    '<div class="tiny">SELECTED</div>' +
+    '<div class="selquote">' + esc(short) + "</div>" +
+
+    '<div class="menu-grid">' +
+      '<button class="btn block" data-act="copy">Copy</button>' +
+      '<button class="btn block" data-act="search">Search the web</button>' +
+      '<button class="btn block" data-act="inlib">Find in this library</button>' +
+      '<button class="btn block" data-act="notes">Add to the notes</button>' +
+      '<button class="btn block" data-act="finding">Raise a finding</button>' +
+      '<button class="btn block" data-act="define">Look up in the publications</button>' +
+    "</div>" +
+
+    '<h3 style="margin:16px 0 8px">Link it to something</h3>' +
+    '<div class="menu-grid">' +
+      '<button class="btn block" data-act="newfolder">' +
+        (desktop ? "New folder" : "New folder in the app") + "</button>" +
+      (desktop ? '<button class="btn block" data-act="pickfolder">Existing folder</button>' : "") +
+      '<button class="btn block" data-act="weblink">Web page</button>' +
+    "</div>" +
+    (desktop
+      ? '<div class="tiny" style="margin-top:8px">Folders are created beside the ' +
+        "app, under links\\\\, so they travel with it on the stick.</div>"
+      : '<div class="tiny" style="margin-top:8px">This device has no folders to ' +
+        "point at, so a new folder is kept inside the app and holds its own files.</div>") +
+
+    '<button class="btn ghost block" id="selCancel" style="margin-top:14px">Cancel</button>'
+  );
+
+  $$("#sheetPanel [data-act]").forEach(b => { b.onclick = () => runSelectionAction(b.dataset.act); });
+  $("#selCancel").onclick = closeSheet;
+  $("#sheet .scrim").onclick = closeSheet;
+}
+
+async function runSelectionAction(act) {
+  const text = menuText;
+  const qid = menuQid;
+  if (!text || !qid) { closeSheet(); return; }
+
+  if (act === "copy") {
+    closeSheet();
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        toast("Copied");
+        return;
+      }
+    } catch (e) { }
+    await shareText(text, "Selected text");
+    return;
+  }
+
+  if (act === "search") {
+    closeSheet();
+    await openExternal(webSearchURL(text));
+    return;
+  }
+
+  if (act === "inlib") {
+    closeSheet();
+    filters.text = text.length > 60 ? text.slice(0, 60) : text;
+    filters.fullText = true;
+    filters.chapter = ""; filters.section = ""; filters.publication = "";
+    const box = $("#fText");
+    if (box) box.value = filters.text;
+    show("library");
+    return;
+  }
+
+  if (act === "notes") {
+    const a = getAnswer(qid) || {};
+    const next = (a.notes ? a.notes.trim() + "\n\n" : "") + text;
+    setAnswer(qid, { notes: next });
+    closeSheet();
+    renderDetail();
+    toast("Added to the notes");
+    return;
+  }
+
+  if (act === "finding") {
+    closeSheet();
+    const title = text.length > 90 ? text.slice(0, 90) + "…" : text;
+    const f = createFinding({ qid: qid, title: title, detail: text, severity: "med" });
+    if (f) openFindingSheet(f.id);
+    return;
+  }
+
+  if (act === "define") {
+    closeSheet();
+    const q = BYID[qid];
+    const pubs = (q && q.publications) || [];
+    const needle = text.toLowerCase();
+    const hit = pubs.find(p => String(p).toLowerCase().indexOf(needle) !== -1);
+    if (hit) {
+      filters.publication = hit;
+      filters.text = "";
+      show("library");
+      toast("Filtered to that publication");
+    } else if (pubs.length) {
+      filters.publication = pubs[0];
+      filters.text = "";
+      show("library");
+      toast("No match — showing the first publication on this question");
+    } else {
+      toast("This question lists no publications.");
+    }
+    return;
+  }
+
+  if (act === "newfolder") {
+    closeSheet();
+    const suggested = folderNameFrom(text);
+    const name = prompt("Folder name", suggested);
+    if (name === null) return;
+    const l = await linkToNewFolder(qid, text, name.trim() || suggested);
+    if (l) { renderDetail(); openLinkSheet(l.id); }
+    return;
+  }
+
+  if (act === "pickfolder") {
+    closeSheet();
+    const l = await linkToExistingFolder(qid);
+    if (l) {
+      updateLink(l.id, { note: text.slice(0, 200) });
+      renderDetail();
+      toast("Linked");
+    }
+    return;
+  }
+
+  if (act === "weblink") {
+    closeSheet();
+    const url = prompt("Web address", "https://");
+    if (!url) return;
+    const clean = normaliseURL(url);
+    if (!clean) { toast("That does not look like a web address."); return; }
+    const label = text.length > 60 ? text.slice(0, 60) + "…" : text;
+    createLink({ qid: qid, label: label, kind: "url", target: clean, note: text.slice(0, 200) });
+    renderDetail();
+    toast("Web link added");
+    return;
+  }
+
+  closeSheet();
+}
+
+/* ------------------------------------------------------- one link's sheet */
+
+function openLinkSheet(id) {
+  const l = STATE.links && STATE.links[id];
+  if (!l) return;
+  const kind = LINK_KINDS[l.kind] || LINK_KINDS.shelf;
+
+  openSheet(
+    '<div class="tiny">' + esc(kind.label.toUpperCase()) + "</div>" +
+    "<h2>" + esc(l.label) + "</h2>" +
+    (l.target ? '<div class="tiny mono" style="overflow-wrap:anywhere">' + esc(l.target) + "</div>" : "") +
+    (l.note ? '<div class="sub" style="margin-top:8px">From: ' + esc(l.note) + "</div>" : "") +
+
+    '<div class="field" style="margin-top:14px">' +
+      '<label class="fl" for="lkLabel">Name</label>' +
+      '<input type="text" id="lkLabel" value="' + esc(l.label) + '"></div>' +
+
+    '<div class="card flat"><h3 style="margin:0 0 9px">Files</h3>' +
+      attachControlsHTML("lkAtt") +
+      '<div class="photos" id="lkPhotos" style="margin-top:11px"></div>' +
+      '<div id="lkFiles" style="margin-top:10px"></div>' +
+    "</div>" +
+
+    '<div class="row" style="margin-top:6px">' +
+      (l.kind !== "shelf" ? '<button class="btn primary grow" id="lkOpen">Open</button>' : "") +
+      '<button class="btn' + (l.kind === "shelf" ? " primary grow" : "") + '" id="lkSave">Save</button>' +
+      '<button class="btn ghost" id="lkClose">Close</button>' +
+    "</div>" +
+    '<button class="btn ghost block" id="lkDelete" style="margin-top:9px;color:var(--bad)">Remove link</button>'
+  );
+
+  const target = { kind: "link", id: l.id };
+  const repaint = () => {
+    const cur = (STATE.links && STATE.links[l.id]) || {};
+    paintPhotos($("#lkPhotos"), cur.photos || [], target, true);
+    paintFiles($("#lkFiles"), cur.files || [], target, true);
+  };
+  repaint();
+  wireAttachControls("lkAtt", target, repaint);
+
+  if ($("#lkOpen")) $("#lkOpen").onclick = () => openLink(l);
+  $("#lkSave").onclick = () => {
+    updateLink(l.id, { label: $("#lkLabel").value.trim() || l.label });
+    closeSheet();
+    if (currentView === "detail") renderDetail();
+    if (currentView === "links") renderLinks();
+    toast("Saved");
+  };
+  $("#lkClose").onclick = () => {
+    closeSheet();
+    if (currentView === "detail") renderDetail();
+    if (currentView === "links") renderLinks();
+  };
+  $("#lkDelete").onclick = async () => {
+    if (!confirm("Remove this link? Any files kept inside it are removed too. " +
+                 "A folder on the computer is left alone.")) return;
+    await deleteLink(l.id);
+    closeSheet();
+    if (currentView === "detail") renderDetail();
+    if (currentView === "links") renderLinks();
+    toast("Link removed");
+  };
+}
+
+/* The same menu, but reached from the Add link button rather than a
+   selection — there is nothing highlighted, so only the link actions apply. */
+function openSelectionMenu2(qid) {
+  const q = BYID[qid];
+  if (!q) return;
+  menuText = q.short;
+  menuQid = qid;
+  const desktop = deskHasLinks();
+
+  openSheet(
+    "<h2>Add a link</h2>" +
+    '<div class="sub">Tied to ' + esc(q.id) + " — " + esc(q.short) + "</div>" +
+    '<div class="menu-grid" style="margin-top:12px">' +
+      '<button class="btn block" data-act="newfolder">' +
+        (desktop ? "New folder" : "New folder in the app") + "</button>" +
+      (desktop ? '<button class="btn block" data-act="pickfolder">Existing folder</button>' : "") +
+      '<button class="btn block" data-act="weblink">Web page</button>' +
+    "</div>" +
+    '<button class="btn ghost block" id="selCancel" style="margin-top:14px">Cancel</button>'
+  );
+  $$("#sheetPanel [data-act]").forEach(b => { b.onclick = () => runSelectionAction(b.dataset.act); });
+  $("#selCancel").onclick = closeSheet;
+  $("#sheet .scrim").onclick = closeSheet;
+}
+
+/* A list of links, used on a question and in the Links view. */
+function renderLinkList(host, list, showQuestion) {
+  if (!host) return;
+  if (!list.length) {
+    host.innerHTML = '<div class="tiny">Nothing linked yet.</div>';
+    return;
+  }
+  host.innerHTML = list.map(l => {
+    const kind = LINK_KINDS[l.kind] || LINK_KINDS.shelf;
+    const n = (l.files || []).length + (l.photos || []).length;
+    const q = showQuestion && l.qid ? BYID[l.qid] : null;
+    return '<div class="filerow" data-link="' + esc(l.id) + '" role="button" tabindex="0">' +
+      '<span class="fi">' + esc(kind.icon) + "</span>" +
+      '<span class="grow"><span class="fn">' + esc(l.label) + "</span>" +
+      '<span class="fm">' + esc(kind.label) +
+        (n ? " · " + n + " file" + (n === 1 ? "" : "s") : "") +
+        (q ? " · " + esc(l.qid) + " " + esc(q.short) : "") +
+      "</span></span>" +
+      (l.kind !== "shelf" ? '<button class="btn sm" data-open-link="' + esc(l.id) + '">Open</button>' : "") +
+    "</div>";
+  }).join("");
+
+  $$("[data-link]", host).forEach(el => {
+    el.onclick = e => {
+      if (e.target && e.target.dataset && e.target.dataset.openLink) return;
+      openLinkSheet(el.dataset.link);
+    };
+  });
+  $$("[data-open-link]", host).forEach(b => {
+    b.onclick = e => {
+      e.stopPropagation();
+      openLink((STATE.links || {})[b.dataset.openLink]);
+    };
+  });
+}
+
+/* ------------------------------------------------------------ the view */
+
+let linkFilter = "all";
+
+function renderLinks() {
+  const host = $("#linkList");
+  if (!host) return;
+  let list = allLinks();
+  if (linkFilter !== "all") list = list.filter(l => l.kind === linkFilter);
+
+  const head = $("#linkHead");
+  if (head) {
+    const all = allLinks();
+    head.innerHTML =
+      '<div class="big">' + all.length + "</div>" +
+      '<div class="small">link' + (all.length === 1 ? "" : "s") + " · " +
+      all.filter(l => l.kind === "folder").length + " folders · " +
+      all.filter(l => l.kind === "shelf").length + " in the app · " +
+      all.filter(l => l.kind === "url").length + " web pages</div>";
+  }
+  $$("#linkFilters .chip").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.lk === linkFilter)));
+
+  if (!list.length) {
+    host.innerHTML = '<div class="empty">Nothing here yet. Select text on a ' +
+      "question, tap ⋯ and link it to a folder or a web page.</div>";
+    return;
+  }
+
+  /* grouped by question, in library order */
+  const byQ = {};
+  list.forEach(l => { (byQ[l.qid || ""] = byQ[l.qid || ""] || []).push(l); });
+  const ids = Object.keys(byQ).sort(cmpId);
+
+  host.innerHTML = "";
+  ids.forEach(qid => {
+    const q = BYID[qid];
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML =
+      '<div class="tiny mono">' + esc(qid || "Not tied to a question") + "</div>" +
+      (q ? '<div style="font-weight:650;margin:2px 0 9px">' + esc(q.short) + "</div>" : "") +
+      '<div class="lk-host"></div>';
+    host.appendChild(card);
+    renderLinkList(card.querySelector(".lk-host"), byQ[qid], false);
+  });
+}
+
+function wireLinks() {
+  $$("#linkFilters .chip").forEach(b => {
+    b.onclick = () => { linkFilter = b.dataset.lk; renderLinks(); };
+  });
+}
+
+/* ============================================================================
    ROVIQ walk mode and bulk editing.
 
    OCIMF tags each question with where the inspector will be standing, not with
@@ -15119,10 +15843,10 @@ function interviewCounts(opts) {
    dashboard.
 
    Order of precedence for a back press:
-     1. a sheet is open            -> close it (it sits on top)
-     2. a report preview is open   -> close it
-     3. anywhere but the dashboard -> previous view, or the dashboard
-     4. on the dashboard           -> press again within two seconds to exit
+     1. a sheet is open          -> close it (it sits on top)
+     2. a report preview is open -> close it
+     3. anywhere with a trail    -> the previous page, where you left it
+     4. trail exhausted          -> press again within two seconds to exit
    ========================================================================= */
 
 const BACK_EXIT_WINDOW = 2000;
@@ -15137,18 +15861,23 @@ let backReady = false;
    back press can return there. */
 function recordNav(view, opts) {
   const prev = navCurrent;
-  navCurrent = { view: view, qid: (view === "detail" ? detailQid : null) };
+  navCurrent = { view: view, qid: (view === "detail" ? detailQid : null), scroll: 0 };
 
   if (opts && (opts.fromPop || opts.replace)) return;
   if (!prev) return;
   if (prev.view === navCurrent.view && prev.qid === navCurrent.qid) return;
 
-  /* The dashboard is home: arriving there ends the trail rather than
-     extending it, so back from home always means "leave". */
-  if (view === "dashboard") { navStack.length = 0; return; }
-
+  /* The dashboard is a page like any other. It used to end the trail, which
+     meant a single tap on the Dashboard tab threw away everything before it
+     and back could never return to where you were reading. */
   navStack.push(prev);
   if (navStack.length > NAV_STACK_MAX) navStack.shift();
+}
+
+/* Remember how far down the page you were, so back returns you to the line
+   you were reading rather than the top. Called before the view changes. */
+function captureScroll() {
+  if (navCurrent) navCurrent.scroll = window.scrollY || window.pageYOffset || 0;
 }
 
 function overlayOpen(id) {
@@ -15162,11 +15891,18 @@ function handleBack() {
   if (overlayOpen("sheet")) { closeSheet(); return true; }
   if (overlayOpen("reportOverlay")) { closeReport(); return true; }
 
-  if (currentView !== "dashboard") {
-    const prev = navStack.pop() || { view: "dashboard", qid: null };
+  if (navStack.length) {
+    const prev = navStack.pop();
     if (prev.view === "detail" && prev.qid) detailQid = prev.qid;
     navCurrent = prev;
-    show(prev.view, { fromPop: true });
+    show(prev.view, { fromPop: true, scrollTo: prev.scroll || 0 });
+    return true;
+  }
+
+  /* nothing left to go back to */
+  if (currentView !== "dashboard") {
+    navCurrent = { view: "dashboard", qid: null, scroll: 0 };
+    show("dashboard", { fromPop: true });
     return true;
   }
   return false;
@@ -15276,6 +16012,18 @@ function wire() {
   }
   window.addEventListener("scroll", onRowPressEnd, { passive: true });
 
+  /* right-click on selected library text offers the same actions as the ⋯ */
+  const detail = $("#detailBody");
+  if (detail) {
+    detail.addEventListener("contextmenu", e => {
+      const ranges = selectionRanges();
+      if (!ranges.length) return;
+      e.preventDefault();
+      markBarRanges = ranges;
+      openSelectionMenu();
+    });
+  }
+
   document.addEventListener("keydown", onShortcutKey);
   document.addEventListener("keydown", e => {
     if (e.key === "Escape" && !capturingFor) { closeSheet(); hideMarkBar(); }
@@ -15296,6 +16044,7 @@ function openMoreSheet() {
   openSheet(
     '<h2>More</h2>' +
     '<button class="btn block primary" data-more="reports" style="margin-bottom:9px">Reports</button>' +
+    '<button class="btn block" data-more="links" style="margin-bottom:9px">Links</button>' +
     '<button class="btn block" data-more="publications" style="margin-bottom:9px">Publications</button>' +
     '<button class="btn block" data-more="particulars" style="margin-bottom:9px">Vessel particulars</button>' +
     '<button class="btn block" data-more="profile" style="margin-bottom:9px">Vessel profile</button>' +
@@ -15356,6 +16105,7 @@ async function boot() {
   wire();
   wireReports();
   wirePublications();
+  wireLinks();
   initBackHandling();
   show("dashboard");
   initPWA();

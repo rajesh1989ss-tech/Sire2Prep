@@ -30,9 +30,12 @@ Back button
 -----------
 The back gesture moves through the app rather than leaving it:
   * an open sheet or report preview closes first
-  * from any page it returns to the previous one, or to the dashboard
-  * on the dashboard it asks once, and a second press within two
-    seconds closes the app
+  * otherwise it returns to the previous page, at the point you had
+    scrolled to, including the question you were reading
+  * the dashboard is a page like any other, so passing through it does
+    not lose your place
+  * once there is nothing left to go back to it asks once, and a second
+    press within two seconds closes the app
 
 Keyboard shortcuts
 ------------------
@@ -109,6 +112,22 @@ per interview, written for the person being asked: what you may be
 asked, what to have ready as a tick list, and what would read badly.
 Pick which interviews to print, and use the short version to leave out
 the negative-observation grounds.
+
+Selecting text
+--------------
+The highlight toolbar now appears next to what you selected. The last
+button on it opens more actions: copy, search the web, find the phrase
+elsewhere in the library, add it to the notes, raise a finding from it,
+or link it to a folder or a web page. Right-clicking selected text on a
+computer opens the same menu.
+
+A phone has no folders to point at, so "new folder" makes one inside the
+app that holds its own files. Open the same data on the desktop and you
+can link to real folders there.
+
+More -> Links lists everything you have linked, and Reports -> Linked
+material prints it with full paths so the material can be found from
+another machine.
 
 Notes
 -----
