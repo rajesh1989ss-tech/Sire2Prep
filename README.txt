@@ -125,6 +125,19 @@ A phone has no folders to point at, so "new folder" makes one inside the
 app that holds its own files. Open the same data on the desktop and you
 can link to real folders there.
 
+Search and assistants
+---------------------
+"Search" uses Google by default; Bing, DuckDuckGo and Startpage are also
+available under Settings -> Looking things up. "Ask" sends the selection
+to Claude, ChatGPT, Perplexity, Copilot or Gemini with a prompt that
+includes the question and asks what an inspector looks for, what evidence
+to have ready, and what would count against the vessel.
+
+The prompt is put on the clipboard as well. Prefilling an assistant is
+not something those sites promise to keep working, so if one opens with
+an empty box, paste it. Gemini has no prefill at all and is labelled as
+such. Both need a connection - neither works at sea without one.
+
 More -> Links lists everything you have linked, and Reports -> Linked
 material prints it with full paths so the material can be found from
 another machine.

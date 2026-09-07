@@ -1005,6 +1005,11 @@ table.rt td.mono { font-family: "Cascadia Mono", Consolas, monospace; white-spac
     </div>
 
     <div class="card">
+      <h2>Looking things up</h2>
+      <div id="lookupBox"></div>
+    </div>
+
+    <div class="card">
       <h2>Follow-up roles</h2>
       <div id="rolesBox"></div>
     </div>
@@ -10968,6 +10973,7 @@ function renderSettings() {
   $("#btnNewCampaign").onclick = () => openCampaignSheet(null);
 
   renderSync();
+  renderLookup();
   renderTextSize();
   renderRoles();
   renderShortcuts();
@@ -13163,7 +13169,7 @@ async function mergeImport(payload) {
   /* Preferences are a single object rather than a keyed map, so they merge on
      their own timestamp. The theme is deliberately left out — it belongs to
      the device, not the data. */
-  const SHARED_PREFS = ["shortcuts", "roles"];
+  const SHARED_PREFS = ["shortcuts", "roles", "engine", "ai"];
   if (d.settings) {
     const mine = STATE.settings || (STATE.settings = {});
     const theirsNewer = String(d.settings.modified || "") > String(mine.modified || "");
@@ -13824,6 +13830,38 @@ function finishCapture(combo) {
 /* ============================================================================
    Follow-up roles editor
    ========================================================================= */
+
+function renderLookup() {
+  const box = $("#lookupBox");
+  if (!box) return;
+
+  box.innerHTML =
+    '<div class="sub">Used by “Search” and “Ask” when you select text in the library. ' +
+    'Both open outside the app, so they need a connection.</div>' +
+    '<div class="field"><label class="fl" for="engineSel">Search engine</label>' +
+      '<select id="engineSel">' +
+        SEARCH_ENGINES.map(e => '<option value="' + e.k + '"' +
+          (e.k === searchEngine().k ? " selected" : "") + ">" + esc(e.label) + "</option>").join("") +
+      "</select></div>" +
+    '<div class="field"><label class="fl" for="aiSel">Assistant</label>' +
+      '<select id="aiSel">' +
+        AI_ASSISTANTS.map(a => '<option value="' + a.k + '"' +
+          (a.k === aiAssistant().k ? " selected" : "") + ">" + esc(a.label) +
+          (a.prefills ? "" : " (opens empty)") + "</option>").join("") +
+      "</select></div>" +
+    '<div class="tiny">The question, your selection and what an inspector looks for ' +
+    "are put into the prompt. It also goes on the clipboard, so if the assistant " +
+    "opens with an empty box you can paste it.</div>";
+
+  $("#engineSel").onchange = e => {
+    setSearchEngine(e.target.value);
+    toast("Searching with " + searchEngine().label);
+  };
+  $("#aiSel").onchange = e => {
+    setAIAssistant(e.target.value);
+    toast("Asking " + aiAssistant().label);
+  };
+}
 
 function renderTextSize() {
   const demo = $("#tsDemo");
@@ -15316,8 +15354,110 @@ async function openLink(l) {
   return false;                       /* a shelf is opened inside the app */
 }
 
-function webSearchURL(text) {
-  return "https://duckduckgo.com/?q=" + encodeURIComponent(String(text || "").slice(0, 300));
+/* ============================================================================
+   Looking something up — a search engine, or an assistant.
+
+   Which one is a preference, not a decision the app should make for you.
+   The assistants take a prefilled prompt through a query parameter; that is
+   not a documented interface and may change, so the prompt is put on the
+   clipboard as well and you can paste it if the page opens empty.
+   ========================================================================= */
+
+const SEARCH_ENGINES = [
+  { k: "google",     label: "Google",     base: "https://www.google.com/search?q=" },
+  { k: "bing",       label: "Bing",       base: "https://www.bing.com/search?q=" },
+  { k: "duckduckgo", label: "DuckDuckGo", base: "https://duckduckgo.com/?q=" },
+  { k: "startpage",  label: "Startpage",  base: "https://www.startpage.com/sp/search?query=" }
+];
+
+const AI_ASSISTANTS = [
+  { k: "claude",     label: "Claude",     base: "https://claude.ai/new?q=",              prefills: true },
+  { k: "chatgpt",    label: "ChatGPT",    base: "https://chatgpt.com/?q=",               prefills: true },
+  { k: "perplexity", label: "Perplexity", base: "https://www.perplexity.ai/search?q=",   prefills: true },
+  { k: "gemini",     label: "Gemini",     base: "https://gemini.google.com/app",         prefills: false },
+  { k: "copilot",    label: "Copilot",    base: "https://copilot.microsoft.com/?q=",     prefills: true }
+];
+
+const DEFAULT_ENGINE = "google";
+const DEFAULT_AI = "claude";
+
+function searchEngine() {
+  const k = (STATE.settings && STATE.settings.engine) || DEFAULT_ENGINE;
+  return SEARCH_ENGINES.find(e => e.k === k) || SEARCH_ENGINES[0];
+}
+
+function aiAssistant() {
+  const k = (STATE.settings && STATE.settings.ai) || DEFAULT_AI;
+  return AI_ASSISTANTS.find(a => a.k === k) || AI_ASSISTANTS[0];
+}
+
+function setSearchEngine(k) {
+  if (!SEARCH_ENGINES.some(e => e.k === k)) return false;
+  if (!STATE.settings) STATE.settings = {};
+  STATE.settings.engine = k;
+  STATE.settings.modified = nowISO();
+  markDirty();
+  return true;
+}
+
+function setAIAssistant(k) {
+  if (!AI_ASSISTANTS.some(a => a.k === k)) return false;
+  if (!STATE.settings) STATE.settings = {};
+  STATE.settings.ai = k;
+  STATE.settings.modified = nowISO();
+  markDirty();
+  return true;
+}
+
+function webSearchURL(text, engineKey) {
+  const e = engineKey
+    ? (SEARCH_ENGINES.find(x => x.k === engineKey) || searchEngine())
+    : searchEngine();
+  return e.base + encodeURIComponent(String(text || "").slice(0, 300));
+}
+
+/* Enough context that the answer is about a tanker inspection rather than the
+   phrase in the abstract. */
+function aiPrompt(text, qid) {
+  const q = qid ? BYID[qid] : null;
+  const lines = [];
+  lines.push("I am preparing a tanker for an OCIMF SIRE 2.0 inspection.");
+  if (q) {
+    lines.push("");
+    lines.push("SIRE 2.0 question " + q.id + " — " + q.short);
+  }
+  lines.push("");
+  lines.push("Explain this, plainly and in a shipboard context:");
+  lines.push('"' + String(text || "").slice(0, 1200) + '"');
+  lines.push("");
+  lines.push("Tell me what an inspector is looking for, what evidence I should " +
+             "have ready on board, and what would count against the vessel.");
+  return lines.join("\n");
+}
+
+function aiURL(prompt, aiKey) {
+  const a = aiKey ? (AI_ASSISTANTS.find(x => x.k === aiKey) || aiAssistant()) : aiAssistant();
+  if (!a.prefills) return a.base;
+  return a.base + encodeURIComponent(String(prompt || "").slice(0, 1800));
+}
+
+/* Open an assistant with the prompt, and leave it on the clipboard too, since
+   the prefill is not something these sites promise to keep working. */
+async function askAssistant(text, qid) {
+  const a = aiAssistant();
+  const prompt = aiPrompt(text, qid);
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(prompt);
+    }
+  } catch (e) { }
+  const okOpened = await openExternal(aiURL(prompt));
+  if (okOpened) {
+    toast(a.prefills
+      ? a.label + " opened — the prompt is also on the clipboard"
+      : a.label + " opened — paste the prompt, it is on the clipboard");
+  }
+  return okOpened;
 }
 
 /* ============================================================================
@@ -15345,7 +15485,8 @@ function openSelectionMenu() {
 
     '<div class="menu-grid">' +
       '<button class="btn block" data-act="copy">Copy</button>' +
-      '<button class="btn block" data-act="search">Search the web</button>' +
+      '<button class="btn block" data-act="search">Search ' + esc(searchEngine().label) + "</button>" +
+      '<button class="btn block" data-act="ask">Ask ' + esc(aiAssistant().label) + "</button>" +
       '<button class="btn block" data-act="inlib">Find in this library</button>' +
       '<button class="btn block" data-act="notes">Add to the notes</button>' +
       '<button class="btn block" data-act="finding">Raise a finding</button>' +
@@ -15394,6 +15535,12 @@ async function runSelectionAction(act) {
   if (act === "search") {
     closeSheet();
     await openExternal(webSearchURL(text));
+    return;
+  }
+
+  if (act === "ask") {
+    closeSheet();
+    await askAssistant(text, qid);
     return;
   }
 
