@@ -330,10 +330,8 @@ table.grid tbody tr:nth-child(even) { background:var(--surface2) }
 /* ====================================================== ANNOTATIONS ==== */
 /* Highlight colours stay light with dark text in every theme — a highlighter
    reads the same way on paper as it does on a black screen. */
-.hl-yellow { background:#fde68a; color:#1f1a05; border-radius:2px }
-.hl-green  { background:#bbf7d0; color:#08240f; border-radius:2px }
-.hl-blue   { background:#bfdbfe; color:#08203f; border-radius:2px }
-.hl-pink   { background:#fbcfe8; color:#360a22; border-radius:2px }
+/* highlight colours are inline, so they can be edited and stacked */
+#detailBody span[style*="background"], .page span[style*="background"] { border-radius:2px }
 .an-b { font-weight:800 }
 .an-i { font-style:italic }
 .an-u { text-decoration:underline; text-decoration-thickness:2px; text-underline-offset:3px }
@@ -368,7 +366,7 @@ table.grid tbody tr:nth-child(even) { background:var(--surface2) }
 
 /* highlights must survive Print to PDF */
 @media print {
-  .hl-yellow, .hl-green, .hl-blue, .hl-pink {
+  span[style*="background"] {
     -webkit-print-color-adjust:exact; print-color-adjust:exact;
   }
   .mark-bar { display:none !important }
@@ -454,6 +452,11 @@ select.statussel.st-wip   { border-color:var(--info); color:var(--info) }
 select.statussel.st-gap   { border-color:var(--bad);  color:var(--bad) }
 select.statussel.st-na    { border-color:var(--line-strong); color:var(--muted) }
 #roleList input.role-name { font-size:14px; padding:6px 8px }
+input.hl-dot {
+  width:34px; height:34px; padding:0; border:1px solid var(--line-strong);
+  border-radius:8px; background:none; flex:0 0 auto; cursor:pointer;
+}
+#hlList input.hl-name { font-size:14px; padding:6px 8px }
 
 /* shortcut editor + report style pickers */
 .sc-sw {
@@ -1012,6 +1015,11 @@ table.rt td.mono { font-family: "Cascadia Mono", Consolas, monospace; white-spac
     <div class="card">
       <h2>Follow-up roles</h2>
       <div id="rolesBox"></div>
+    </div>
+
+    <div class="card">
+      <h2>Highlight colours</h2>
+      <div id="hlBox"></div>
     </div>
 
     <div class="card">
@@ -9721,20 +9729,127 @@ function fileCount() {
    block index and a character range, plus the marked text itself so a mark can
    be verified rather than blindly reapplied. Marks are global rather than
    per inspection — what you have learned about a question carries across ships.
+
+   Highlight colours are data, not stylesheet classes, so they can be added and
+   edited. That also lets a passage carry several colours at once: the runs are
+   painted with a gradient rather than one background.
    ========================================================================= */
 
-const MARK_STYLES = [
-  { k: "hl-yellow", label: "Yellow", kind: "highlight", swatch: "#fde68a" },
-  { k: "hl-green",  label: "Green",  kind: "highlight", swatch: "#bbf7d0" },
-  { k: "hl-blue",   label: "Blue",   kind: "highlight", swatch: "#bfdbfe" },
-  { k: "hl-pink",   label: "Pink",   kind: "highlight", swatch: "#fbcfe8" },
-  { k: "an-b",      label: "Bold",       kind: "text" },
-  { k: "an-i",      label: "Italic",     kind: "text" },
-  { k: "an-u",      label: "Underline",  kind: "text" }
+const DEFAULT_HIGHLIGHTS = [
+  { k: "hl-yellow", label: "Yellow", bg: "#fde68a" },
+  { k: "hl-green",  label: "Green",  bg: "#bbf7d0" },
+  { k: "hl-blue",   label: "Blue",   bg: "#bfdbfe" },
+  { k: "hl-pink",   label: "Pink",   bg: "#fbcfe8" }
 ];
 
-const HIGHLIGHT_KEYS = MARK_STYLES.filter(s => s.kind === "highlight").map(s => s.k);
-const MARK_KEYS = MARK_STYLES.map(s => s.k);
+const TEXT_STYLES = [
+  { k: "an-b", label: "Bold" },
+  { k: "an-i", label: "Italic" },
+  { k: "an-u", label: "Underline" }
+];
+
+const TEXT_KEYS = TEXT_STYLES.map(s => s.k);
+
+/* Readable ink for any background the person picks. */
+function inkFor(bg) {
+  const hex = String(bg || "").replace("#", "");
+  const full = hex.length === 3 ? hex.split("").map(c => c + c).join("") : hex;
+  if (full.length !== 6) return "#101010";
+  const r = parseInt(full.slice(0, 2), 16);
+  const g = parseInt(full.slice(2, 4), 16);
+  const b = parseInt(full.slice(4, 6), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.55 ? "#14110a" : "#ffffff";
+}
+
+function highlights() {
+  if (!STATE.settings) STATE.settings = {};
+  const list = STATE.settings.highlights;
+  if (!Array.isArray(list) || !list.length) {
+    STATE.settings.highlights = DEFAULT_HIGHLIGHTS.map(h => Object.assign({}, h));
+  }
+  return STATE.settings.highlights;
+}
+
+function highlightByKey(k) {
+  return highlights().find(h => h.k === k) || null;
+}
+
+function HIGHLIGHT_KEYS_now() { return highlights().map(h => h.k); }
+
+/* Every style that can be applied, highlights first. */
+function markStyles() {
+  return highlights().map(h => ({ k: h.k, label: h.label, kind: "highlight", swatch: h.bg }))
+    .concat(TEXT_STYLES.map(t => ({ k: t.k, label: t.label, kind: "text" })));
+}
+
+function markKeys() {
+  return HIGHLIGHT_KEYS_now().concat(TEXT_KEYS);
+}
+
+function isHighlightKey(k) {
+  return HIGHLIGHT_KEYS_now().indexOf(k) !== -1;
+}
+
+function markLabel(k) {
+  const hit = markStyles().find(s => s.k === k);
+  return hit ? hit.label : k;
+}
+
+/* ------------------------------------------------------ editing colours */
+
+function addHighlight(label, bg) {
+  const name = String(label || "").trim() || "Colour";
+  const colour = /^#[0-9a-f]{6}$/i.test(String(bg || "")) ? String(bg).toLowerCase() : "#ffd966";
+  const list = highlights();
+  if (list.length >= 12) return { ok: false, error: "Twelve colours is plenty." };
+  const key = "hl-" + uid("c").slice(2, 10);
+  list.push({ k: key, label: name, bg: colour });
+  STATE.settings.modified = nowISO();
+  markDirty();
+  return { ok: true, key: key };
+}
+
+function updateHighlight(k, fields) {
+  const h = highlightByKey(k);
+  if (!h) return { ok: false, error: "No such colour." };
+  if (fields.label !== undefined) h.label = String(fields.label).trim() || h.label;
+  if (fields.bg !== undefined && /^#[0-9a-f]{6}$/i.test(String(fields.bg))) {
+    h.bg = String(fields.bg).toLowerCase();
+  }
+  STATE.settings.modified = nowISO();
+  markDirty();
+  return { ok: true };
+}
+
+/* Removing a colour leaves the marks made with it in place — they simply stop
+   being offered. Nothing you have already marked up is quietly erased. */
+function removeHighlight(k) {
+  const list = highlights();
+  if (list.length <= 1) return { ok: false, error: "Keep at least one colour." };
+  const at = list.findIndex(h => h.k === k);
+  if (at === -1) return { ok: false, error: "No such colour." };
+  list.splice(at, 1);
+  STATE.settings.modified = nowISO();
+  markDirty();
+  return { ok: true };
+}
+
+function resetHighlights() {
+  STATE.settings.highlights = DEFAULT_HIGHLIGHTS.map(h => Object.assign({}, h));
+  STATE.settings.modified = nowISO();
+  markDirty();
+}
+
+/* How many marks use a colour, so removing one can say what it affects. */
+function highlightUsage(k) {
+  let n = 0;
+  Object.keys(STATE.annotations || {}).forEach(qid => {
+    const rec = STATE.annotations[qid];
+    if (rec && !rec.deleted) n += (rec.marks || []).filter(m => m.style === k).length;
+  });
+  return n;
+}
 
 function annRecord(qid, create) {
   if (!STATE.annotations) STATE.annotations = {};
@@ -9763,23 +9878,17 @@ function annCount(qid) {
    new one replaces any earlier highlight underneath it; bold, italic and
    underline stack freely. */
 function addMarks(qid, ranges, style) {
-  if (!ranges || !ranges.length || MARK_KEYS.indexOf(style) === -1) return 0;
+  if (!ranges || !ranges.length || markKeys().indexOf(style) === -1) return 0;
   const rec = annRecord(qid, true);
   let added = 0;
 
   ranges.forEach(r => {
     if (!r || r.end <= r.start) return;
-    if (HIGHLIGHT_KEYS.indexOf(style) !== -1) {
-      rec.marks = rec.marks.filter(m => !(
-        HIGHLIGHT_KEYS.indexOf(m.style) !== -1 &&
-        m.field === r.field && m.block === r.block &&
-        m.start < r.end && m.end > r.start));
-    } else {
-      /* the same style twice over the same span is a no-op */
-      const dup = rec.marks.some(m => m.style === style && m.field === r.field &&
-        m.block === r.block && m.start <= r.start && m.end >= r.end);
-      if (dup) return;
-    }
+    /* Colours stack, so a passage can carry more than one. Applying the same
+       one over a span it already covers is a no-op rather than a duplicate. */
+    const dup = rec.marks.some(m => m.style === style && m.field === r.field &&
+      m.block === r.block && m.start <= r.start && m.end >= r.end);
+    if (dup) return;
     rec.marks.push({
       id: uid("mk"), field: r.field, block: r.block,
       start: r.start, end: r.end, style: style,
@@ -9833,6 +9942,7 @@ function renderMarks(text, marks) {
 
   const n = src.length;
   const at = new Array(n);
+  const keys = markKeys();
   let any = false;
 
   marks.forEach(m => {
@@ -9849,7 +9959,7 @@ function renderMarks(text, marks) {
   const keyOf = i => {
     const o = at[i];
     if (!o) return "";
-    return MARK_KEYS.filter(k => o[k]).join(" ");
+    return keys.filter(k => o[k]).join(" ");
   };
 
   let out = "", runStart = 0, runKey = keyOf(0);
@@ -9857,12 +9967,37 @@ function renderMarks(text, marks) {
     const k = i < n ? keyOf(i) : "\u0000";
     if (k !== runKey) {
       const chunk = esc(src.slice(runStart, i));
-      out += runKey ? '<span class="' + runKey + '">' + chunk + "</span>" : chunk;
+      out += runKey ? wrapRun(runKey, chunk) : chunk;
       runStart = i;
       runKey = k;
     }
   }
   return out;
+}
+
+/* One run of identically-styled characters. Several colours over the same
+   words are painted as bands rather than one overwriting the other. */
+function wrapRun(runKey, chunk) {
+  const applied = runKey.split(" ");
+  const cls = applied.filter(k => TEXT_KEYS.indexOf(k) !== -1);
+  const cols = applied.filter(isHighlightKey)
+    .map(highlightByKey)
+    .filter(Boolean);
+
+  let style = "";
+  if (cols.length === 1) {
+    style = "background:" + cols[0].bg + ";color:" + inkFor(cols[0].bg);
+  } else if (cols.length > 1) {
+    const step = 100 / cols.length;
+    const stops = cols.map((c, i) =>
+      c.bg + " " + (i * step).toFixed(2) + "% " + ((i + 1) * step).toFixed(2) + "%").join(",");
+    style = "background:linear-gradient(180deg," + stops + ");color:" + inkFor(cols[0].bg);
+  }
+
+  return "<span" +
+    (cls.length ? ' class="' + cls.join(" ") + '"' : "") +
+    (style ? ' style="' + style + '"' : "") +
+    ">" + chunk + "</span>";
 }
 
 /* ------------------------------------------------- selection to ranges */
@@ -9943,7 +10078,7 @@ function selectionRanges() {
 
 /* ------------------------------------------------------- style labels */
 
-const MARK_LABEL = MARK_STYLES.reduce((o, s) => (o[s.k] = s.label, o), {});
+function MARK_LABEL_of(k) { return markLabel(k); }
 
 const FIELD_LABEL = {
   question:   "Question",
@@ -9984,7 +10119,7 @@ function mergeRanges(list) {
    styles: array of style keys, or null for all. */
 function collectMarked(styles, chapter) {
   const wanted = {};
-  (styles && styles.length ? styles : MARK_KEYS).forEach(k => { wanted[k] = true; });
+  (styles && styles.length ? styles : markKeys()).forEach(k => { wanted[k] = true; });
 
   const results = [];
   const ann = STATE.annotations || {};
@@ -10062,8 +10197,29 @@ function markedStats(styles, chapter) {
 
 /* ============================================================ SHORTCUTS */
 
-const SHORTCUT_ACTIONS = MARK_STYLES.map(s => ({ k: s.k, label: s.label, kind: s.kind }))
-  .concat([{ k: "erase", label: "Remove marks", kind: "tool" }]);
+/* Everything a shortcut can be bound to: the colours, the text styles, the
+   eraser, and the actions on the selection menu. */
+const MENU_ACTIONS = [
+  { k: "menu",       label: "Open the actions menu" },
+  { k: "copy",       label: "Copy" },
+  { k: "search",     label: "Search the web" },
+  { k: "ask",        label: "Ask the assistant" },
+  { k: "inlib",      label: "Find in this library" },
+  { k: "notes",      label: "Add to the notes" },
+  { k: "finding",    label: "Raise a finding" },
+  { k: "define",     label: "Look up in the publications" },
+  { k: "newfolder",  label: "Link to a new folder" },
+  { k: "pickfolder", label: "Link to an existing folder" },
+  { k: "weblink",    label: "Link to a web page" }
+];
+
+const MENU_KEYS = MENU_ACTIONS.map(a => a.k);
+
+function shortcutActions() {
+  return markStyles().map(s => ({ k: s.k, label: s.label, kind: s.kind, swatch: s.swatch }))
+    .concat([{ k: "erase", label: "Remove marks", kind: "tool" }])
+    .concat(MENU_ACTIONS.map(a => ({ k: a.k, label: a.label, kind: "action" })));
+}
 
 const DEFAULT_SHORTCUTS = {
   "hl-yellow": "Ctrl+1",
@@ -10073,7 +10229,18 @@ const DEFAULT_SHORTCUTS = {
   "an-b":      "Ctrl+B",
   "an-i":      "Ctrl+I",
   "an-u":      "Ctrl+U",
-  "erase":     "Ctrl+0"
+  "erase":     "Ctrl+0",
+  "menu":      "Ctrl+Shift+M",
+  "copy":      "Ctrl+Shift+C",
+  "search":    "Ctrl+Shift+G",
+  "ask":       "Ctrl+Shift+A",
+  "inlib":     "Ctrl+Shift+F",
+  "notes":     "Ctrl+Shift+N",
+  "finding":   "Ctrl+Shift+R",
+  "define":    "Ctrl+Shift+P",
+  "newfolder": "Ctrl+Shift+D",
+  "pickfolder": "Ctrl+Shift+E",
+  "weblink":   "Ctrl+Shift+L"
 };
 
 /* A keyboard event as a stable, comparable string. */
@@ -10113,7 +10280,7 @@ function actionForCombo(combo) {
 /* Returns {ok:true} or {ok:false, error, clash} */
 function setShortcut(action, combo) {
   if (!combo) return { ok: false, error: "No key was pressed." };
-  if (SHORTCUT_ACTIONS.findIndex(a => a.k === action) === -1) {
+  if (shortcutActions().findIndex(a => a.k === action) === -1) {
     return { ok: false, error: "Unknown action." };
   }
   /* a bare letter would fire while reading, so a modifier is required */
@@ -10137,7 +10304,7 @@ function resetShortcuts() {
 }
 
 function markActionLabel(action) {
-  const a = SHORTCUT_ACTIONS.find(x => x.k === action);
+  const a = shortcutActions().find(x => x.k === action);
   return a ? a.label : action;
 }
 
@@ -10974,6 +11141,7 @@ function renderSettings() {
 
   renderSync();
   renderLookup();
+  renderHighlights();
   renderTextSize();
   renderRoles();
   renderShortcuts();
@@ -11549,7 +11717,7 @@ let markBarRanges = [];
 
 function markBarHTML() {
   return '<div class="mb-inner">' +
-    MARK_STYLES.filter(s => s.kind === "highlight").map(s =>
+    markStyles().filter(s => s.kind === "highlight").map(s =>
       '<button class="mb-sw" data-style="' + s.k + '" title="' + esc(s.label) +
       '" aria-label="' + esc(s.label) + '" style="background:' + s.swatch + '"></button>').join("") +
     '<span class="mb-sep"></span>' +
@@ -11635,7 +11803,7 @@ function applyMark(style) {
     toast(n ? "Marks removed" : "Nothing to remove here");
   } else {
     addMarks(q.id, markBarRanges, style);
-    const s = MARK_STYLES.find(x => x.k === style);
+    const s = markStyles().find(x => x.k === style);
     toast(s ? s.label : "Marked");
   }
 
@@ -12145,13 +12313,13 @@ function particularsItems() {
 
 function markedItems(opts) {
   const items = [];
-  const styles = opts.markStyles && opts.markStyles.length ? opts.markStyles : MARK_KEYS;
+  const styles = opts.markStyles && opts.markStyles.length ? opts.markStyles : markKeys();
   const chapter = opts.chapter && opts.kind === "marks" ? opts.chapter : "";
   const groups = collectMarked(styles, chapter);
   const stats = { questions: groups.length, passages: 0 };
   groups.forEach(g => { stats.passages += g.passages.length; });
 
-  const chosen = MARK_STYLES.filter(s => styles.indexOf(s.k) !== -1);
+  const chosen = markStyles().filter(s => styles.indexOf(s.k) !== -1);
   const head = el("div");
   head.innerHTML =
     "<h2>Highlights and marked text</h2>" +
@@ -12160,7 +12328,8 @@ function markedItems(opts) {
     '<table class="kv">' +
       "<tr><th>Marks included</th><td>" +
         chosen.map(s => s.kind === "highlight"
-          ? '<span class="' + s.k + '">' + esc(s.label) + " highlight</span>"
+          ? '<span style="background:' + esc(s.swatch) + ";color:" + esc(inkFor(s.swatch)) +
+            ';padding:0 2mm;border-radius:1mm">' + esc(s.label) + " highlight</span>"
           : '<span class="' + s.k + '">' + esc(s.label) + "</span>").join(" &nbsp; ") +
       "</td></tr>" +
       (chapter ? "<tr><th>Chapter</th><td>" + esc(chapter) + ". " +
@@ -12696,7 +12865,7 @@ function openReportOptions(kind) {
     (isMarks
       ? '<div class="field"><label class="fl">Which marks to include</label>' +
         '<div id="roStyles">' +
-          MARK_STYLES.map(st => {
+          markStyles().map(st => {
             const on = !repOpts.markStyles || repOpts.markStyles.indexOf(st.k) !== -1;
             const chip = st.swatch
               ? '<span class="sc-sw" style="background:' + st.swatch + '"></span>'
@@ -12861,7 +13030,7 @@ function openReportOptions(kind) {
     $("#roAll").onclick = () => { $$("#roStyles input").forEach(x => { x.checked = true; }); refresh(); };
     $("#roNone").onclick = () => { $$("#roStyles input").forEach(x => { x.checked = false; }); refresh(); };
     $("#roHl").onclick = () => {
-      $$("#roStyles input").forEach(x => { x.checked = HIGHLIGHT_KEYS.indexOf(x.dataset.style) !== -1; });
+      $$("#roStyles input").forEach(x => { x.checked = isHighlightKey(x.dataset.style); });
       refresh();
     };
     refresh();
@@ -13169,7 +13338,7 @@ async function mergeImport(payload) {
   /* Preferences are a single object rather than a keyed map, so they merge on
      their own timestamp. The theme is deliberately left out — it belongs to
      the device, not the data. */
-  const SHARED_PREFS = ["shortcuts", "roles", "engine", "ai"];
+  const SHARED_PREFS = ["shortcuts", "roles", "engine", "ai", "highlights"];
   if (d.settings) {
     const mine = STATE.settings || (STATE.settings = {});
     const theirsNewer = String(d.settings.modified || "") > String(mine.modified || "");
@@ -13728,13 +13897,25 @@ function isTypingTarget(el) {
   return el.isContentEditable === true;
 }
 
-/* Apply a mark action to whatever is selected. Returns true if it did. */
+/* Run a shortcut against whatever is selected. Covers the colours and text
+   styles, the eraser, and everything on the actions menu. Returns true if it
+   did something, so the key can be taken from the browser. */
 function runMarkAction(action) {
   if (currentView !== "detail") return false;
   const q = BYID[detailQid];
   if (!q) return false;
   const ranges = selectionRanges();
   if (!ranges.length) return false;
+
+  if (MENU_KEYS.indexOf(action) !== -1) {
+    markBarRanges = ranges;
+    if (action === "menu") { openSelectionMenu(); return true; }
+    menuText = ranges.map(r => r.text).join(" ").trim();
+    menuQid = q.id;
+    hideMarkBar();
+    runSelectionAction(action);
+    return true;
+  }
 
   if (action === "erase") {
     const n = clearMarks(q.id, ranges);
@@ -13779,23 +13960,30 @@ function renderShortcuts() {
   const box = $("#shortcutBox");
   if (!box) return;
 
+  const rowFor = a => {
+    const sw = markStyles().find(s => s.k === a.k);
+    const chip = sw && sw.swatch
+      ? '<span class="sc-sw" style="background:' + esc(sw.swatch) + '"></span>'
+      : '<span class="sc-sw sc-' + esc(a.k) + '">' +
+        (a.k === "an-b" ? "B" : a.k === "an-i" ? "I" : a.k === "an-u" ? "U"
+         : a.k === "erase" ? "✕" : "•") + "</span>";
+    return '<div class="filerow">' + chip +
+      '<span class="grow"><span class="fn">' + esc(a.label) + "</span></span>" +
+      '<kbd class="sc-key" data-key="' + esc(a.k) + '">' +
+        esc(shortcutFor(a.k) || "not set") + "</kbd>" +
+      '<button class="btn sm" data-bind="' + esc(a.k) + '">Change</button>' +
+    "</div>";
+  };
+  const all = shortcutActions();
+
   box.innerHTML =
     '<div class="sub">Select text in the library, then press a combination. ' +
     'Shortcuts only fire while text is selected, so they never get in the way of reading.</div>' +
     '<div id="scList">' +
-      SHORTCUT_ACTIONS.map(a => {
-        const sw = MARK_STYLES.find(s => s.k === a.k);
-        const chip = sw && sw.swatch
-          ? '<span class="sc-sw" style="background:' + sw.swatch + '"></span>'
-          : '<span class="sc-sw sc-' + esc(a.k) + '">' +
-            (a.k === "an-b" ? "B" : a.k === "an-i" ? "I" : a.k === "an-u" ? "U" : "✕") + "</span>";
-        return '<div class="filerow">' + chip +
-          '<span class="grow"><span class="fn">' + esc(a.label) + "</span></span>" +
-          '<kbd class="sc-key" data-key="' + esc(a.k) + '">' +
-            esc(shortcutFor(a.k) || "not set") + "</kbd>" +
-          '<button class="btn sm" data-bind="' + esc(a.k) + '">Change</button>' +
-        "</div>";
-      }).join("") +
+      '<div class="leghead">Marking up</div>' +
+      all.filter(a => a.kind !== "action").map(rowFor).join("") +
+      '<div class="leghead">Actions on the selection</div>' +
+      all.filter(a => a.kind === "action").map(rowFor).join("") +
     "</div>" +
     '<button class="btn sm ghost block" id="scReset" style="margin-top:11px">Restore defaults</button>';
 
@@ -14137,6 +14325,78 @@ function wirePublications() {
     pubApplicableOnly = !pubApplicableOnly;
     only.setAttribute("aria-pressed", String(pubApplicableOnly));
     renderPublications();
+  };
+}
+
+/* ============================================================================
+   Highlight colour editor
+   ========================================================================= */
+
+function renderHighlights() {
+  const box = $("#hlBox");
+  if (!box) return;
+  const list = highlights();
+
+  box.innerHTML =
+    '<div class="sub">These are the colours offered when you mark up the ' +
+    'library. A passage can carry more than one — overlapping colours are ' +
+    'painted as bands rather than one hiding the other.</div>' +
+    '<div id="hlList">' +
+      list.map((h, i) => {
+        const used = highlightUsage(h.k);
+        return '<div class="filerow">' +
+          '<input type="color" class="hl-dot" data-col="' + esc(h.k) + '" value="' + esc(h.bg) + '">' +
+          '<span class="grow"><input type="text" class="hl-name" data-name="' + esc(h.k) +
+            '" value="' + esc(h.label) + '"></span>' +
+          (used ? '<span class="pill role">' + used + "</span>" : "") +
+          '<button class="btn sm ghost" data-hldel="' + esc(h.k) + '"' +
+            (list.length <= 1 ? " disabled" : "") + ">✕</button>" +
+        "</div>";
+      }).join("") +
+    "</div>" +
+    '<div class="row" style="margin-top:10px">' +
+      '<input type="color" id="hlNewColour" value="#ffd966">' +
+      '<input type="text" id="hlNewName" placeholder="Name, e.g. Check with office" class="grow">' +
+      '<button class="btn sm primary" id="hlAdd">Add</button>' +
+    "</div>" +
+    '<button class="btn sm ghost block" id="hlReset" style="margin-top:9px">Restore the four defaults</button>';
+
+  const refresh = () => {
+    renderHighlights();
+    if (currentView === "detail") renderDetail();
+    hideMarkBar();
+  };
+
+  $$("#hlList .hl-dot").forEach(inp => {
+    inp.onchange = () => { updateHighlight(inp.dataset.col, { bg: inp.value }); refresh(); };
+  });
+  $$("#hlList .hl-name").forEach(inp => {
+    inp.onchange = () => { updateHighlight(inp.dataset.name, { label: inp.value }); refresh(); };
+  });
+  $$("#hlList [data-hldel]").forEach(b => {
+    b.onclick = () => {
+      const k = b.dataset.hldel;
+      const used = highlightUsage(k);
+      if (used && !confirm("This colour is on " + used + " passage" + (used === 1 ? "" : "s") +
+          ". Removing it stops it being offered; what you have already marked stays as it is. Continue?")) return;
+      const r = removeHighlight(k);
+      if (!r.ok) { toast(r.error); return; }
+      refresh();
+      toast("Colour removed");
+    };
+  });
+
+  $("#hlAdd").onclick = () => {
+    const r = addHighlight($("#hlNewName").value, $("#hlNewColour").value);
+    if (!r.ok) { toast(r.error); return; }
+    refresh();
+    toast("Colour added");
+  };
+  $("#hlReset").onclick = () => {
+    if (!confirm("Restore the four standard colours? Marks made with colours you added stay as they are.")) return;
+    resetHighlights();
+    refresh();
+    toast("Colours restored");
   };
 }
 

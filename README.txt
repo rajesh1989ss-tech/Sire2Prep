@@ -125,6 +125,25 @@ A phone has no folders to point at, so "new folder" makes one inside the
 app that holds its own files. Open the same data on the desktop and you
 can link to real folders there.
 
+Highlight colours
+-----------------
+Settings -> Highlight colours lets you rename, recolour, add or remove
+them. Text ink is chosen automatically so a colour you pick stays
+readable. Removing a colour stops it being offered but never erases what
+you already marked with it.
+
+A passage can carry several colours at once, and any mix of bold, italic
+and underline. Overlapping colours are painted as bands so none is
+hidden. Applying the same colour or style twice over the same span does
+nothing rather than duplicating it.
+
+Shortcuts
+---------
+Every action on the selection menu can be bound to a key, not just the
+marking ones - copy, search, ask, find in the library, add to notes,
+raise a finding, and the three link actions. Colours you add yourself
+start unbound and can be given a key like any other.
+
 Search and assistants
 ---------------------
 "Search" uses Google by default; Bing, DuckDuckGo and Startpage are also
