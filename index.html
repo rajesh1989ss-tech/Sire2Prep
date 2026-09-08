@@ -11781,13 +11781,16 @@ function placeMarkBar() {
   const bh = bar.offsetHeight || 48;
   const vw = window.innerWidth || 360;
   const vh = window.innerHeight || 640;
-  const gap = 10;
+  /* a touch selection puts drag handles just below the text, so leave room */
+  const touch = typeof isTouchInput === "function" && isTouchInput();
+  const gap = touch ? 14 : 10;
+  const below = touch ? 34 : gap;
 
   let left = rect.left + rect.width / 2 - bw / 2;
   left = Math.max(8, Math.min(left, vw - bw - 8));
 
   let top = rect.top - bh - gap;                 /* above the selection */
-  if (top < 8) top = rect.bottom + gap;          /* no room, go below */
+  if (top < 8) top = rect.bottom + below;        /* no room: below, clear of the handles */
   top = Math.max(8, Math.min(top, vh - bh - 8));
 
   bar.style.left = Math.round(left) + "px";
@@ -15726,6 +15729,18 @@ async function askAssistant(text, qid) {
 
 let menuText = "";
 let menuQid = "";
+let lastPointerType = "";
+
+/* Whether the last input was a finger. A long press on a touch screen fires
+   contextmenu while the selection is still being dragged, so it must not be
+   treated as a right-click. */
+function isTouchInput() {
+  if (lastPointerType === "touch" || lastPointerType === "pen") return true;
+  if (lastPointerType === "mouse") return false;
+  try {
+    return !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+  } catch (e) { return false; }
+}
 
 function openSelectionMenu() {
   const ranges = markBarRanges.length ? markBarRanges : selectionRanges();
@@ -16419,10 +16434,20 @@ function wire() {
   }
   window.addEventListener("scroll", onRowPressEnd, { passive: true });
 
-  /* right-click on selected library text offers the same actions as the ⋯ */
+  /* Right-click on selected library text offers the same actions as the ⋯.
+
+     On a touch screen a long press IS the contextmenu event, and it arrives
+     as the selection is being made — opening the menu there stole the gesture
+     and made it impossible to drag the selection handles. Touch therefore
+     reaches these actions only through the ⋯ button on the toolbar. */
+  document.addEventListener("pointerdown", e => {
+    lastPointerType = (e && e.pointerType) || "";
+  }, true);
+
   const detail = $("#detailBody");
   if (detail) {
     detail.addEventListener("contextmenu", e => {
+      if (isTouchInput()) return;                /* let the phone select text */
       const ranges = selectionRanges();
       if (!ranges.length) return;
       e.preventDefault();
@@ -16440,7 +16465,9 @@ function wire() {
      touch handle drag, so it is what the markup toolbar listens to */
   document.addEventListener("selectionchange", () => {
     clearTimeout(window.__selTimer);
-    window.__selTimer = setTimeout(onSelectionChanged, 180);
+    /* a finger drags the handles over many events — wait for it to settle,
+       or the toolbar jumps about under the thumb mid-selection */
+    window.__selTimer = setTimeout(onSelectionChanged, isTouchInput() ? 420 : 160);
   });
 
   window.addEventListener("beforeunload", () => { if (dirty) flush(); });

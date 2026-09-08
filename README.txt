@@ -115,11 +115,13 @@ the negative-observation grounds.
 
 Selecting text
 --------------
-The highlight toolbar now appears next to what you selected. The last
-button on it opens more actions: copy, search the web, find the phrase
+The highlight toolbar appears next to what you selected. The last button
+on it - the three dots - opens more actions: copy, search the web, find the phrase
 elsewhere in the library, add it to the notes, raise a finding from it,
 or link it to a folder or a web page. Right-clicking selected text on a
-computer opens the same menu.
+computer opens the same menu. On a phone or tablet it does not: a long
+press there is how you start selecting, so the menu is reached only
+through the three dots, leaving the drag handles free.
 
 A phone has no folders to point at, so "new folder" makes one inside the
 app that holds its own files. Open the same data on the desktop and you
