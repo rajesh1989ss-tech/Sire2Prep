@@ -806,6 +806,7 @@ table.rt td.mono { font-family: "Cascadia Mono", Consolas, monospace; white-spac
       </div>
     </div>
 
+    <div id="dashShared"></div>
     <div id="dashProgress"></div>
     <div id="dashExtra"></div>
 
@@ -1043,6 +1044,11 @@ table.rt td.mono { font-family: "Cascadia Mono", Consolas, monospace; white-spac
         <button class="btn sm" data-theme-set="amoled">AMOLED</button>
         <button class="btn sm" data-theme-set="hc">High contrast</button>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>Working alongside others</h2>
+      <div id="syncFolderBox"></div>
     </div>
 
     <div class="card">
@@ -8981,6 +8987,7 @@ function migrate(s) {
 
 function markDirty() {
   dirty = true;
+  if (typeof syncWake === "function") syncWake();
   STATE.modified = nowISO();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(flush, 400);
@@ -10562,6 +10569,7 @@ function renderDashboard() {
   bindQRows($("#dashAttention"), "dashboard");
 
   recordReadiness();
+  renderSharedCard();
   renderProgressCard();
 
   const ft = findingStats();
@@ -11140,6 +11148,7 @@ function renderSettings() {
   $("#btnNewCampaign").onclick = () => openCampaignSheet(null);
 
   renderSync();
+  renderSyncPanel();
   renderLookup();
   renderHighlights();
   renderTextSize();
@@ -13286,6 +13295,18 @@ function newer(a, b) {
   return String(a && a.modified || "") >= String(b && b.modified || "");
 }
 
+/* Two people editing the same record in the same second produce identical
+   timestamps. Without a tie-break each machine keeps its own copy and they
+   never agree, so the winner is decided by comparing the records themselves —
+   arbitrary, but every machine reaches the same answer, which is the point. */
+function tieBreak(inc, cur) {
+  try {
+    const a = JSON.stringify(inc), b = JSON.stringify(cur);
+    if (a === b) return false;
+    return a > b;
+  } catch (e) { return false; }
+}
+
 /* Merge one keyed map. Returns {added, updated, skipped}. */
 function mergeMap(mine, theirs, stats) {
   Object.keys(theirs || {}).forEach(k => {
@@ -13293,7 +13314,11 @@ function mergeMap(mine, theirs, stats) {
     if (!inc || typeof inc !== "object") return;
     const cur = mine[k];
     if (!cur) { mine[k] = inc; stats.added++; return; }
-    if (newer(inc, cur) && String(inc.modified || "") !== String(cur.modified || "")) {
+    const sameStamp = String(inc.modified || "") === String(cur.modified || "");
+    if (newer(inc, cur) && !sameStamp) {
+      mine[k] = inc; stats.updated++; return;
+    }
+    if (sameStamp && tieBreak(inc, cur)) {
       mine[k] = inc; stats.updated++; return;
     }
     stats.skipped++;
@@ -13307,14 +13332,18 @@ function mergeCampaigns(mine, theirs, stats) {
     if (!inc || !inc.id) return;
     const cur = byId[inc.id];
     if (!cur) { mine.push(inc); byId[inc.id] = inc; stats.added++; return; }
-    if (newer(inc, cur) && String(inc.modified || "") !== String(cur.modified || "")) {
+    const sameStamp = String(inc.modified || "") === String(cur.modified || "");
+    if (newer(inc, cur) && !sameStamp) {
+      Object.assign(cur, inc); stats.updated++; return;
+    }
+    if (sameStamp && tieBreak(inc, cur)) {
       Object.assign(cur, inc); stats.updated++; return;
     }
     stats.skipped++;
   });
 }
 
-async function mergeImport(payload) {
+async function mergeImport(payload, opts) {
   if (!payload || typeof payload !== "object") throw new Error("That file is not valid JSON.");
   if (payload.app !== APP_ID) {
     throw new Error("That backup is from " + (payload.app || "an unknown app") +
@@ -13370,6 +13399,9 @@ async function mergeImport(payload) {
     }
   }
 
+  /* Adopt an inspection when there is none — otherwise a second computer
+     receives the work and shows none of it. Never switch away from one that
+     is already open, so a background sync cannot move the person about. */
   if (!activeCampaign()) {
     const first = liveCampaigns()[0];
     STATE.activeCampaign = first ? first.id : null;
@@ -16087,6 +16119,360 @@ function wireLinks() {
 }
 
 /* ============================================================================
+   Shared-folder sync.
+
+   When the app runs from a network share, every instance keeps its own
+   database and drops its state into a common sync\ folder. Each reads the
+   others and merges them. No two processes write the same file, which is why
+   this works over SMB where sharing one database does not.
+
+   It is eventually consistent, not transactional. Two people editing the same
+   question within the same few seconds will see the later edit win — the same
+   rule the import has always used.
+   ========================================================================= */
+
+const SYNC_INTERVAL_MS = 15000;
+const SYNC_IDLE_STEPS = [15000, 15000, 30000, 60000];   /* backs off when quiet */
+const SYNC_MEDIA_PER_CYCLE = 8;      /* keep a cycle short on a slow share */
+
+let syncState = {
+  available: false,
+  enabled: true,
+  info: null,
+  seen: {},            /* device -> mtime already merged */
+  lastPush: "",        /* hash of what we last wrote */
+  lastAt: "",
+  lastError: "",
+  busy: false,
+  pulled: 0,
+  pushed: 0
+};
+
+let syncTimer = null;
+let syncQuiet = 0;          /* consecutive cycles in which nothing happened */
+
+/* With a dozen machines on one folder there is no point every one of them
+   listing it four times a minute when nobody is doing anything. The interval
+   stretches while the folder is quiet and snaps back the moment it is not. */
+function syncInterval() {
+  const i = Math.min(syncQuiet, SYNC_IDLE_STEPS.length - 1);
+  return SYNC_IDLE_STEPS[i];
+}
+
+function syncReschedule() {
+  if (syncTimer) clearTimeout(syncTimer);
+  if (!syncSupported() || !syncOn()) return;
+  syncTimer = setTimeout(async () => {
+    await syncOnce();
+    syncReschedule();
+  }, syncInterval());
+}
+
+function syncSupported() {
+  return !!(DESK && typeof DESK.sync_info === "function");
+}
+
+function syncOn() {
+  if (!STATE.settings) STATE.settings = {};
+  return STATE.settings.syncEnabled !== false;
+}
+
+function setSyncOn(on) {
+  STATE.settings.syncEnabled = !!on;
+  markDirty();
+  if (on) startSync(); else stopSync();
+}
+
+/* A cheap fingerprint of the data, ignoring timestamps that move on their own,
+   so an unchanged state is not written to the share every cycle. */
+function syncFingerprint(payload) {
+  const copy = JSON.parse(JSON.stringify(payload.data || {}));
+  let s = JSON.stringify(copy);
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return String(h) + ":" + s.length;
+}
+
+async function syncOnce(manual) {
+  if (!syncSupported() || syncState.busy) return null;
+  if (!manual && !syncOn()) return null;
+
+  syncState.busy = true;
+  const result = { pushed: false, merged: 0, peers: 0, media: 0, error: "" };
+
+  try {
+    const info = await DESK.sync_info();
+    syncState.info = info;
+    syncState.available = !!(info && info.writable);
+    result.peers = (info && info.peers && info.peers.length) || 0;
+
+    if (!syncState.available) {
+      syncState.lastError = "The shared folder is not writable.";
+      result.error = syncState.lastError;
+      return result;
+    }
+    syncState.lastError = "";
+
+    /* ---- push ours, but only when something actually changed ---- */
+    const payload = await buildExport(false);
+    const print = syncFingerprint(payload);
+    if (print !== syncState.lastPush) {
+      const r = await DESK.sync_push(JSON.stringify(payload));
+      if (r && r.ok) {
+        syncState.lastPush = print;
+        syncState.pushed++;
+        result.pushed = true;
+      } else {
+        syncState.lastError = (r && r.error) || "Could not write to the shared folder.";
+        result.error = syncState.lastError;
+      }
+    }
+
+    /* ---- pull everyone else's and merge ---- */
+    const incoming = await DESK.sync_pull(JSON.stringify(syncState.seen));
+    for (const item of (incoming || [])) {
+      let parsed = null;
+      try { parsed = JSON.parse(item.payload); }
+      catch (e) { continue; }                    /* a half-written file: next time */
+      if (!parsed || parsed.app !== APP_ID) continue;
+      try {
+        await mergeImport(parsed, { quiet: true });
+        syncState.seen[item.device] = item.mtime;
+        result.merged++;
+      } catch (e) {
+        syncState.lastError = e.message || "A peer's file could not be merged.";
+      }
+    }
+
+    /* ---- media, lazily and a few at a time ---- */
+    if (typeof DESK.sync_media_index === "function") {
+      const wanted = collectPhotoIds();
+      const shared = (await DESK.sync_media_index()) || [];
+      const sharedSet = {};
+      shared.forEach(id => { sharedSet[id] = true; });
+
+      /* fetch anything referenced that we do not hold */
+      let fetched = 0;
+      for (const id of wanted) {
+        if (fetched >= SYNC_MEDIA_PER_CYCLE) break;
+        if (!sharedSet[id]) continue;
+        let have = null;
+        try { have = await Media.get(id); } catch (e) { }
+        if (have && have.data) continue;
+        const data = await DESK.sync_pull_media(id);
+        if (data) { await Media.put(id, data, {}); fetched++; result.media++; }
+      }
+
+      /* offer up anything of ours the folder does not have yet */
+      let sent = 0;
+      for (const id of wanted) {
+        if (sent >= SYNC_MEDIA_PER_CYCLE) break;
+        if (sharedSet[id]) continue;
+        let rec = null;
+        try { rec = await Media.get(id); } catch (e) { }
+        if (!rec || !rec.data) continue;
+        await DESK.sync_push_media(id, rec.data);
+        sent++;
+      }
+    }
+
+    syncState.lastAt = nowISO();
+    if (result.pushed || result.merged) syncQuiet = 0;
+    else syncQuiet++;
+    syncState.interval = syncInterval();
+
+    if (result.merged) {
+      if (currentView === "dashboard") renderDashboard();
+      if (currentView === "library") renderQList();
+      if (currentView === "findings") renderFindings();
+      if (currentView === "settings") renderSyncPanel();
+    }
+    return result;
+  } catch (e) {
+    syncState.lastError = e.message || "Sync failed.";
+    result.error = syncState.lastError;
+    return result;
+  } finally {
+    syncState.busy = false;
+    if (currentView === "settings") renderSyncPanel();
+  }
+}
+
+function startSync() {
+  if (!syncSupported()) return;
+  stopSync();
+  syncQuiet = 0;
+  syncOnce().then(syncReschedule);
+}
+
+function stopSync() {
+  if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; }
+}
+
+/* Anything the person does makes the folder interesting again. */
+function syncWake() {
+  if (syncQuiet === 0) return;
+  syncQuiet = 0;
+  syncReschedule();
+}
+
+/* ------------------------------------------------------------ how it looks */
+
+const SKEW_LIMIT_SEC = 600;          /* ten minutes is generous for a ship LAN */
+
+function skewText(sec) {
+  const s = Math.abs(sec);
+  const amount = s < 3600
+    ? Math.round(s / 60) + " min"
+    : Math.round(s / 3600) + " h";
+  return amount + (sec < 0 ? " behind" : " ahead");
+}
+
+/* Newest-wins only holds if the machines agree on the time. A clock that is
+   badly out means that computer's work is silently overwritten, or overwrites
+   everyone else's, so it has to be said out loud. */
+function clockWarnings() {
+  const info = syncState.info;
+  if (!info) return [];
+  const out = [];
+  if (typeof info.skewSec === "number" && Math.abs(info.skewSec) > SKEW_LIMIT_SEC) {
+    out.push("This computer's clock is " + skewText(info.skewSec) +
+      " of the shared folder. Your edits may be lost or may override everyone " +
+      "else's. Put the clock right.");
+  }
+  (info.peers || []).forEach(p => {
+    if (typeof p.skewSec === "number" && Math.abs(p.skewSec) > SKEW_LIMIT_SEC) {
+      out.push((p.label || p.device) + " has a clock " + skewText(p.skewSec) +
+        ". Their work may be overwritten, or may override yours.");
+    }
+  });
+  return out;
+}
+
+function peerAge(at) {
+  if (!at) return "never";
+  const secs = Math.max(0, Math.round((Date.now() - Date.parse(at)) / 1000));
+  if (secs < 90) return "just now";
+  if (secs < 3600) return Math.round(secs / 60) + " min ago";
+  if (secs < 86400) return Math.round(secs / 3600) + " h ago";
+  return Math.round(secs / 86400) + " days ago";
+}
+
+/* A line on the dashboard, so everyone can see who else is working. */
+function renderSharedCard() {
+  const host = $("#dashShared");
+  if (!host) return;
+  if (!syncSupported() || !syncState.info || !syncState.info.shared) {
+    host.innerHTML = "";
+    return;
+  }
+
+  const info = syncState.info;
+  const peers = info.peers || [];
+  const on = syncOn();
+
+  host.innerHTML =
+    '<div class="card"><div class="spread">' +
+      "<div>" +
+        '<div class="tiny">SHARED FOLDER</div>' +
+        '<div class="big">' + (peers.length + 1) + "</div>" +
+        '<div class="small">' +
+          (peers.length
+            ? "people using this copy"
+            : "only you so far") +
+        "</div>" +
+      "</div>" +
+      '<button class="btn sm" id="syncNow">' + (syncState.busy ? "Syncing…" : "Sync now") + "</button>" +
+    "</div>" +
+    (peers.length
+      ? '<div style="margin-top:10px">' +
+        peers.map(p =>
+          '<div class="filerow"><span class="fi">' +
+            esc(String(p.label || p.device).slice(0, 3).toUpperCase()) + "</span>" +
+          '<span class="grow"><span class="fn">' + esc(p.label || p.device) + "</span>" +
+          '<span class="fm">last seen ' + esc(peerAge(p.at)) + "</span></span></div>").join("") +
+        "</div>"
+      : "") +
+    clockWarnings().map(w =>
+      '<div class="banner bad" style="margin-top:10px"><div>' + esc(w) + "</div></div>").join("") +
+    (!on
+      ? '<div class="banner warn" style="margin-top:10px"><div>Sharing is switched ' +
+        "off, so nobody else sees your work.</div></div>"
+      : syncState.lastError
+        ? '<div class="banner bad" style="margin-top:10px"><div>' + esc(syncState.lastError) + "</div></div>"
+        : '<div class="tiny" style="margin-top:8px">Work from everyone merges every ' +
+          Math.round((syncState.interval || SYNC_INTERVAL_MS) / 1000) +
+          " seconds. Last sync " + esc(peerAge(syncState.lastAt)) + ".</div>") +
+    "</div>";
+
+  const b = $("#syncNow");
+  if (b) b.onclick = async () => {
+    b.textContent = "Syncing…";
+    const r = await syncOnce(true);
+    renderSharedCard();
+    if (r && r.error) toast(r.error);
+    else toast(r && r.merged ? "Merged " + r.merged + " update" + (r.merged === 1 ? "" : "s") : "Up to date");
+  };
+}
+
+function renderSyncPanel() {
+  const box = $("#syncFolderBox");
+  if (!box) return;
+
+  if (!syncSupported()) {
+    box.innerHTML = '<div class="tiny">Sharing needs the desktop app. In a ' +
+      "browser, use Export and import instead.</div>";
+    return;
+  }
+
+  const info = syncState.info || {};
+  const peers = info.peers || [];
+
+  box.innerHTML =
+    '<div class="sub">' +
+      (info.shared
+        ? "This copy is running from a shared folder, so it can work alongside " +
+          "other computers."
+        : "This copy is running from a local folder. Put it on a shared drive " +
+          "and everyone can work at once.") +
+    "</div>" +
+    '<label class="switch"><input type="checkbox" id="syncToggle"' +
+      (syncOn() ? " checked" : "") + ">" +
+      '<span><span class="t">Share my work through the folder</span>' +
+      '<span class="d">Your statuses, notes, findings and photos become visible ' +
+      "to everyone using this copy.</span></span></label>" +
+    '<div class="tiny" style="margin-top:10px">' +
+      "This computer: <b>" + esc(info.label || "unknown") + "</b><br>" +
+      "Its own data: " + esc(info.runtime || "—") + "<br>" +
+      "Shared folder: " + esc(info.folder || "—") +
+      (info.writable ? "" : " <b>(not writable)</b>") + "<br>" +
+      peers.length + " other" + (peers.length === 1 ? "" : "s") + " seen · " +
+      "last sync " + esc(peerAge(syncState.lastAt)) +
+    "</div>" +
+    (syncState.lastError ? '<div class="banner bad" style="margin-top:10px"><div>' +
+      esc(syncState.lastError) + "</div></div>" : "") +
+    clockWarnings().map(w =>
+      '<div class="banner bad" style="margin-top:10px"><div>' + esc(w) + "</div></div>").join("") +
+    '<button class="btn sm block" id="syncNowSettings" style="margin-top:10px">Sync now</button>' +
+    '<div class="tiny" style="margin-top:9px">Work merges rather than overwriting: ' +
+    "for every question the later edit wins, and nothing is lost by two people " +
+    "working on different questions. Two people editing the <i>same</i> question " +
+    "within a few seconds will keep the later one.</div>";
+
+  $("#syncToggle").onchange = e => {
+    setSyncOn(e.target.checked);
+    toast(e.target.checked ? "Sharing on" : "Sharing off");
+    renderSyncPanel();
+  };
+  $("#syncNowSettings").onclick = async () => {
+    const r = await syncOnce(true);
+    renderSyncPanel();
+    if (r && r.error) toast(r.error);
+    else toast(r && r.merged ? "Merged " + r.merged + " update" + (r.merged === 1 ? "" : "s") : "Up to date");
+  };
+}
+
+/* ============================================================================
    ROVIQ walk mode and bulk editing.
 
    OCIMF tags each question with where the inspector will be standing, not with
@@ -16470,7 +16856,11 @@ function wire() {
     window.__selTimer = setTimeout(onSelectionChanged, isTouchInput() ? 420 : 160);
   });
 
-  window.addEventListener("beforeunload", () => { if (dirty) flush(); });
+  window.addEventListener("beforeunload", () => {
+    if (dirty) flush();
+    /* leave the last of the work where the others can see it */
+    if (syncSupported() && syncOn()) { try { syncOnce(true); } catch (e) { } }
+  });
   document.addEventListener("visibilitychange", () => { if (document.hidden && dirty) flush(); });
 }
 
@@ -16538,6 +16928,7 @@ async function boot() {
 
   wire();
   wireReports();
+  if (syncSupported()) startSync();
   wirePublications();
   wireLinks();
   initBackHandling();
