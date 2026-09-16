@@ -372,6 +372,22 @@ table.grid tbody tr:nth-child(even) { background:var(--surface2) }
   .mark-bar { display:none !important }
 }
 
+/* the shared clock in the header */
+#btnClock { font-family:var(--mono); font-weight:700; letter-spacing:.4px; min-width:62px }
+#btnClock.local { border-style:dashed; color:var(--warn) }
+.clock-face {
+  font-family:var(--mono); font-size:34px; font-weight:800; letter-spacing:1px;
+  line-height:1.1;
+}
+
+/* text that leads somewhere */
+.txtlink {
+  color:var(--accent); text-decoration:underline; text-underline-offset:2px;
+  text-decoration-thickness:1.5px; cursor:pointer;
+}
+.txtlink:hover { text-decoration-thickness:2.5px }
+.page .txtlink { color:#123; text-decoration-thickness:1px; cursor:auto }
+
 /* selection menu + links */
 .selquote {
   border-left:3px solid var(--accent); padding:7px 11px; margin:4px 0 6px;
@@ -775,6 +791,9 @@ table.rt td.mono { font-family: "Cascadia Mono", Consolas, monospace; white-spac
     <button class="btn sm ghost" id="btnCampaign" title="Switch inspection">
       <span id="campaignLabel">—</span>
     </button>
+    <button class="btn sm ghost" id="btnClock" title="Ship time">
+      <span id="clockNow">--:--</span>
+    </button>
     <button class="btn sm ghost" id="btnTheme" title="Change theme" aria-label="Change theme">◐</button>
   </div>
 </header>
@@ -1044,6 +1063,21 @@ table.rt td.mono { font-family: "Cascadia Mono", Consolas, monospace; white-spac
         <button class="btn sm" data-theme-set="amoled">AMOLED</button>
         <button class="btn sm" data-theme-set="hc">High contrast</button>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>Ship time</h2>
+      <div id="clockBox"></div>
+    </div>
+
+    <div class="card">
+      <h2>Activation</h2>
+      <div id="licenceBox"></div>
+    </div>
+
+    <div class="card">
+      <h2>Safety copies</h2>
+      <div id="safetyBox"></div>
     </div>
 
     <div class="card">
@@ -8622,7 +8656,44 @@ const IDB_STORE   = "kv";
 const $  = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.prototype.slice.call((r || document).querySelectorAll(s));
 
-function nowISO() { return new Date().toISOString(); }
+/* ---------------------------------------------------------------- time
+
+   Every record is stamped with "ship time", not the time on this computer.
+
+   A ship crosses zones and not every machine is put right, so local clocks
+   disagree by hours. Ordering people's work by them would mean a computer
+   left on last month's zone quietly losing its edits, or overriding
+   everyone's. The shared folder sits on one machine with one clock that
+   every computer reads the same way, so that is the clock the app runs on.
+
+   Off a share, or before the folder has been read, this is simply the local
+   clock — a single user has nobody to disagree with. */
+let clockOffsetMs = 0;        /* this computer, against the shared clock */
+let clockSource = "this computer";
+
+function shipMillis() { return Date.now() + clockOffsetMs; }
+
+function nowISO() { return new Date(shipMillis()).toISOString(); }
+
+/* The clock people read, which may carry a deliberate adjustment so it shows
+   the ship's working time rather than whatever zone the server is set to. */
+function displayOffsetMin() {
+  const v = STATE && STATE.settings ? Number(STATE.settings.shipOffsetMin) : 0;
+  return isFinite(v) ? v : 0;
+}
+
+function shipDisplayMillis() { return shipMillis() + displayOffsetMin() * 60000; }
+
+function shipClockText() {
+  const d = new Date(shipDisplayMillis());
+  const p = n => String(n).padStart(2, "0");
+  return p(d.getUTCHours()) + ":" + p(d.getUTCMinutes());
+}
+
+function setClockOffset(sec, source) {
+  clockOffsetMs = Math.round((Number(sec) || 0) * 1000);
+  clockSource = source || clockSource;
+}
 
 function uid(prefix) {
   const r = (typeof crypto !== "undefined" && crypto.getRandomValues)
@@ -9357,6 +9428,27 @@ function readAndScale(file) {
 
 /* Attach files to a target: {kind:"finding"|"answer", id} */
 async function attachPhotos(files, target) {
+  const folderPath = folderTargetPath(target);
+  if (folderPath) {
+    /* a photo taken against a folder link belongs in the folder too, scaled
+       down the same way as any other photo */
+    const written = [];
+    for (let i = 0; i < files.length; i++) {
+      try {
+        const scaled = await readAndScale(files[i]);
+        const r = await DESK.write_to_folder(folderPath, scaled.name || "photo.jpg", scaled.data);
+        if (r && r.ok) written.push(r);
+        else toast((r && r.error) || "Could not write the photo");
+      } catch (e) {
+        toast(e.message || "Could not write the photo");
+      }
+    }
+    if (written.length) {
+      toast(written.length + " photo" + (written.length === 1 ? "" : "s") + " saved into the folder");
+    }
+    return written;
+  }
+
   const added = [];
   for (let i = 0; i < files.length; i++) {
     try {
@@ -9638,7 +9730,42 @@ function targetFiles(target) {
   return (a && a.files) || [];
 }
 
+/* A link pointing at a real folder is not a place to keep copies — the file
+   belongs in the folder itself, where it can be opened and shared like any
+   other. Everything else keeps its attachments inside the app. */
+function folderTargetPath(target) {
+  if (!target || target.kind !== "link") return "";
+  const l = (STATE.links || {})[target.id];
+  if (!l || l.kind !== "folder" || !l.target) return "";
+  if (!DESK || typeof DESK.write_to_folder !== "function") return "";
+  return l.target;
+}
+
+async function attachToFolder(files, path) {
+  const written = [];
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    try {
+      const data = await readFileAsDataURL(file);
+      const r = await DESK.write_to_folder(path, file.name || "attachment", data);
+      if (r && r.ok) written.push(r);
+      else toast((r && r.error) || "Could not write " + (file.name || "the file"));
+    } catch (e) {
+      toast("Could not write " + (file.name || "the file"));
+    }
+  }
+  if (written.length) {
+    toast(written.length === 1
+      ? "Saved " + written[0].name + " into the folder"
+      : written.length + " files saved into the folder");
+  }
+  return written;
+}
+
 async function attachFiles(files, target) {
+  const folder = folderTargetPath(target);
+  if (folder) return attachToFolder(files, folder);
+
   const added = [];
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
@@ -9938,7 +10065,23 @@ function clearAllMarks(qid) {
    covering each character, then emit one span per run of identical styles.
    That way a bold word inside a highlight comes out right. */
 function markupText(text, qid, field, block) {
-  return renderMarks(text, qid ? annMarksFor(qid, field, block) : []);
+  const marks = qid ? annMarksFor(qid, field, block) : [];
+  return renderMarks(text, marks.concat(qid ? linkMarksFor(qid, field, block) : []));
+}
+
+/* Text that something has been linked to is rendered as a link, so it is
+   obvious at a glance which phrases lead somewhere. */
+function linkMarksFor(qid, field, block) {
+  const out = [];
+  linksFor(qid).forEach(l => {
+    (l.anchors || []).forEach(a => {
+      if (a.field === field && a.block === block) {
+        out.push({ style: "lnk:" + l.id, field: field, block: block,
+                   start: a.start, end: a.end });
+      }
+    });
+  });
+  return out;
 }
 
 /* Core renderer, given an explicit list of marks. Reports pass a filtered
@@ -9966,7 +10109,9 @@ function renderMarks(text, marks) {
   const keyOf = i => {
     const o = at[i];
     if (!o) return "";
-    return keys.filter(k => o[k]).join(" ");
+    const own = keys.filter(k => o[k]);
+    const links = Object.keys(o).filter(k => k.indexOf("lnk:") === 0);
+    return own.concat(links).join(" ");
   };
 
   let out = "", runStart = 0, runKey = keyOf(0);
@@ -9987,6 +10132,7 @@ function renderMarks(text, marks) {
 function wrapRun(runKey, chunk) {
   const applied = runKey.split(" ");
   const cls = applied.filter(k => TEXT_KEYS.indexOf(k) !== -1);
+  const linked = applied.filter(k => k.indexOf("lnk:") === 0);
   const cols = applied.filter(isHighlightKey)
     .map(highlightByKey)
     .filter(Boolean);
@@ -10001,8 +10147,12 @@ function wrapRun(runKey, chunk) {
     style = "background:linear-gradient(180deg," + stops + ");color:" + inkFor(cols[0].bg);
   }
 
+  if (linked.length) cls.push("txtlink");
+
   return "<span" +
     (cls.length ? ' class="' + cls.join(" ") + '"' : "") +
+    (linked.length ? ' data-open-link="' + esc(linked[0].slice(4)) + '"' +
+      ' role="link" tabindex="0"' : "") +
     (style ? ' style="' + style + '"' : "") +
     ">" + chunk + "</span>";
 }
@@ -10524,6 +10674,13 @@ function renderDashboard() {
   const hidden = QUESTIONS.length - apps.length;
   let bhtml = "";
 
+  const safetyWarn = safetyWarning();
+  if (safetyWarn) {
+    bhtml += '<div class="banner bad"><div>' + esc(safetyWarn) +
+      '<div style="margin-top:8px"><button class="btn sm primary" id="safetyFix">' +
+      "Set up a safety copy</button></div></div></div>";
+  }
+
   if (nudge) {
     bhtml +=
       '<div class="banner warn"><div>' +
@@ -10545,6 +10702,10 @@ function renderDashboard() {
   }
 
   banners.innerHTML = bhtml;
+
+  if (safetyWarn) {
+    $("#safetyFix").onclick = () => show("settings");
+  }
 
   if (nudge) {
     $("#nudgeExport").onclick = async () => { await doExport(false); renderDashboard(); };
@@ -10975,6 +11136,20 @@ function renderDetail() {
   dRepaint();
   wireAttachControls("dAtt", dTarget, dRepaint);
 
+  $$("#detailBody [data-open-link]").forEach(el => {
+    const open = () => {
+      const l = (STATE.links || {})[el.dataset.openLink];
+      if (!l) return;
+      if (l.kind === "url" || l.kind === "folder") openLink(l);
+      else openLinkSheet(l.id);
+    };
+    el.onclick = e => { e.stopPropagation(); open(); };
+    el.onkeydown = e => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+    };
+    el.title = "Opens " + ((STATE.links || {})[el.dataset.openLink] || {}).label;
+  });
+
   $$("#detailBody [data-pub]").forEach(b => {
     b.onclick = () => {
       filters.publication = b.dataset.pub;
@@ -11148,6 +11323,9 @@ function renderSettings() {
   $("#btnNewCampaign").onclick = () => openCampaignSheet(null);
 
   renderSync();
+  renderClockPanel();
+  renderLicencePanel();
+  renderSafetyPanel();
   renderSyncPanel();
   renderLookup();
   renderHighlights();
@@ -13370,16 +13548,25 @@ async function mergeImport(payload, opts) {
   /* Preferences are a single object rather than a keyed map, so they merge on
      their own timestamp. The theme is deliberately left out — it belongs to
      the device, not the data. */
-  const SHARED_PREFS = ["shortcuts", "roles", "engine", "ai", "highlights"];
+  const SHARED_PREFS = ["shortcuts", "roles", "engine", "ai", "highlights", "shipOffsetMin"];
+
+/* Preferences are not all objects. Object.assign({}, 140) is {}, which would
+   quietly turn a number into nothing. */
+function copyPref(v) {
+  if (Array.isArray(v)) return v.slice();
+  if (v && typeof v === "object") return Object.assign({}, v);
+  return v;
+}
   if (d.settings) {
     const mine = STATE.settings || (STATE.settings = {});
     const theirsNewer = String(d.settings.modified || "") > String(mine.modified || "");
     SHARED_PREFS.forEach(k => {
-      if (!d.settings[k]) return;
-      if (!mine[k] || theirsNewer) {
-        mine[k] = Array.isArray(d.settings[k])
-          ? d.settings[k].slice()
-          : Object.assign({}, d.settings[k]);
+      const theirs = d.settings[k];
+      /* a preference can be a number, and zero is a real value — "switch the
+         adjustment off" has to travel like any other setting */
+      if (theirs === undefined || theirs === null) return;
+      if (mine[k] === undefined || theirsNewer) {
+        mine[k] = copyPref(theirs);
         stats.updated++;
       }
     });
@@ -15761,6 +15948,7 @@ async function askAssistant(text, qid) {
 
 let menuText = "";
 let menuQid = "";
+let menuRanges = [];
 let lastPointerType = "";
 
 /* Whether the last input was a finger. A long press on a touch screen fires
@@ -15782,6 +15970,8 @@ function openSelectionMenu() {
 
   menuText = text;
   menuQid = q.id;
+  menuRanges = ranges.map(r => ({ field: r.field, block: r.block,
+                                  start: r.start, end: r.end, text: r.text }));
   const short = text.length > 70 ? text.slice(0, 70) + "…" : text;
   const desktop = deskHasLinks();
 
@@ -15908,7 +16098,11 @@ async function runSelectionAction(act) {
     const name = prompt("Folder name", suggested);
     if (name === null) return;
     const l = await linkToNewFolder(qid, text, name.trim() || suggested);
-    if (l) { renderDetail(); openLinkSheet(l.id); }
+    if (l) {
+      anchorLink(l.id);
+      renderDetail();
+      openLinkSheet(l.id);
+    }
     return;
   }
 
@@ -15917,6 +16111,7 @@ async function runSelectionAction(act) {
     const l = await linkToExistingFolder(qid);
     if (l) {
       updateLink(l.id, { note: text.slice(0, 200) });
+      anchorLink(l.id);
       renderDetail();
       toast("Linked");
     }
@@ -15930,7 +16125,9 @@ async function runSelectionAction(act) {
     const clean = normaliseURL(url);
     if (!clean) { toast("That does not look like a web address."); return; }
     const label = text.length > 60 ? text.slice(0, 60) + "…" : text;
-    createLink({ qid: qid, label: label, kind: "url", target: clean, note: text.slice(0, 200) });
+    const wl = createLink({ qid: qid, label: label, kind: "url", target: clean,
+                            note: text.slice(0, 200) });
+    anchorLink(wl.id);
     renderDetail();
     toast("Web link added");
     return;
@@ -15939,7 +16136,52 @@ async function runSelectionAction(act) {
   closeSheet();
 }
 
+/* Tie a link to the words that were selected, so they can be shown as a link
+   in the text. Nothing to tie it to is fine — the link still lives on the
+   question, it simply has no underlined phrase. */
+function anchorLink(id) {
+  if (!menuRanges.length) return;
+  updateLink(id, { anchors: menuRanges.slice() });
+}
+
 /* ------------------------------------------------------- one link's sheet */
+
+/* What is really in a linked folder, listed from disk. Anything put there
+   through Windows shows up here as well, which is the point of a folder. */
+async function paintFolderFiles(host, path) {
+  if (!host) return;
+  host.innerHTML = '<div class="tiny">Reading the folder…</div>';
+  let r = null;
+  try { r = await DESK.folder_files(path); } catch (e) { r = null; }
+
+  if (!r || !r.exists) {
+    host.innerHTML = '<div class="banner bad"><div>That folder is no longer there.</div></div>';
+    return;
+  }
+  const files = r.files || [];
+  if (!files.length) {
+    host.innerHTML = '<div class="tiny">The folder is empty. Add files here, or ' +
+      "drop them straight into it in Windows — either way they show up.</div>";
+    return;
+  }
+
+  host.innerHTML = files.map(f =>
+    '<div class="filerow">' +
+      '<span class="fi">' + esc((f.name.split(".").pop() || "").slice(0, 3).toUpperCase()) + "</span>" +
+      '<span class="grow"><span class="fn">' + esc(f.name) + "</span>" +
+      '<span class="fm">' + esc(fmtSize(f.bytes)) + " · " +
+        esc(String(f.at).replace("T", " ").slice(0, 16)) + "</span></span>" +
+      '<button class="btn sm" data-open-file="' + esc(f.path) + '">Open</button>' +
+    "</div>").join("") +
+    '<div class="tiny" style="margin-top:8px">' + files.length + " file" +
+    (files.length === 1 ? "" : "s") + " in the folder itself, not inside the app.</div>";
+
+  $$("[data-open-file]", host).forEach(b => {
+    b.onclick = () => {
+      if (typeof DESK.open_path === "function") DESK.open_path(b.dataset.openFile);
+    };
+  });
+}
 
 function openLinkSheet(id) {
   const l = STATE.links && STATE.links[id];
@@ -15971,8 +16213,18 @@ function openLinkSheet(id) {
   );
 
   const target = { kind: "link", id: l.id };
+  const onDisk = !!folderTargetPath(target);
+
   const repaint = () => {
     const cur = (STATE.links && STATE.links[l.id]) || {};
+    if (onDisk) {
+      /* show the folder itself, so anything dropped in through Windows
+         appears here too */
+      const ph = $("#lkPhotos");
+      if (ph) ph.innerHTML = "";
+      paintFolderFiles($("#lkFiles"), l.target);
+      return;
+    }
     paintPhotos($("#lkPhotos"), cur.photos || [], target, true);
     paintFiles($("#lkFiles"), cur.files || [], target, true);
   };
@@ -16010,6 +16262,7 @@ function openSelectionMenu2(qid) {
   if (!q) return;
   menuText = q.short;
   menuQid = qid;
+  menuRanges = [];          /* nothing was selected, so nothing to underline */
   const desktop = deskHasLinks();
 
   openSheet(
@@ -16201,6 +16454,19 @@ async function syncOnce(manual) {
   const result = { pushed: false, merged: 0, peers: 0, media: 0, error: "" };
 
   try {
+    /* the shared clock first — everything stamped this cycle uses it */
+    if (typeof DESK.clock_probe === "function") {
+      try {
+        const c = await DESK.clock_probe();
+        if (c && c.ok) {
+          setClockOffset(c.offsetSec, "the shared folder");
+          syncState.clockOk = true;
+        } else {
+          syncState.clockOk = false;
+        }
+      } catch (e) { syncState.clockOk = false; }
+    }
+
     const info = await DESK.sync_info();
     syncState.info = info;
     syncState.available = !!(info && info.writable);
@@ -16282,6 +16548,7 @@ async function syncOnce(manual) {
     syncState.interval = syncInterval();
 
     if (result.merged) {
+      paintClock();                       /* a peer may have set the time */
       if (currentView === "dashboard") renderDashboard();
       if (currentView === "library") renderQList();
       if (currentView === "findings") renderFindings();
@@ -16318,35 +16585,17 @@ function syncWake() {
 
 /* ------------------------------------------------------------ how it looks */
 
-const SKEW_LIMIT_SEC = 600;          /* ten minutes is generous for a ship LAN */
-
-function skewText(sec) {
-  const s = Math.abs(sec);
-  const amount = s < 3600
-    ? Math.round(s / 60) + " min"
-    : Math.round(s / 3600) + " h";
-  return amount + (sec < 0 ? " behind" : " ahead");
-}
-
-/* Newest-wins only holds if the machines agree on the time. A clock that is
-   badly out means that computer's work is silently overwritten, or overwrites
-   everyone else's, so it has to be said out loud. */
+/* Local clocks no longer decide anything, so a machine set to the wrong zone
+   is not a problem to warn about. What does matter is losing the shared clock
+   itself — then the app falls back to local time and disagreement returns. */
 function clockWarnings() {
-  const info = syncState.info;
-  if (!info) return [];
-  const out = [];
-  if (typeof info.skewSec === "number" && Math.abs(info.skewSec) > SKEW_LIMIT_SEC) {
-    out.push("This computer's clock is " + skewText(info.skewSec) +
-      " of the shared folder. Your edits may be lost or may override everyone " +
-      "else's. Put the clock right.");
+  if (!syncState.info || !syncState.info.shared) return [];
+  if (syncState.clockOk === false) {
+    return ["The shared clock could not be read, so times are coming from this " +
+      "computer for now. If its clock is wrong, your work may be ordered wrongly " +
+      "against everyone else's."];
   }
-  (info.peers || []).forEach(p => {
-    if (typeof p.skewSec === "number" && Math.abs(p.skewSec) > SKEW_LIMIT_SEC) {
-      out.push((p.label || p.device) + " has a clock " + skewText(p.skewSec) +
-        ". Their work may be overwritten, or may override yours.");
-    }
-  });
-  return out;
+  return [];
 }
 
 function peerAge(at) {
@@ -16469,6 +16718,420 @@ function renderSyncPanel() {
     renderSyncPanel();
     if (r && r.error) toast(r.error);
     else toast(r && r.merged ? "Merged " + r.merged + " update" + (r.merged === 1 ? "" : "s") : "Up to date");
+  };
+}
+
+/* ============================================================================
+   Safety copies.
+
+   Everything else the app writes lives in the app's own folder. If that folder
+   is deleted, that is the lot. A safety copy is a single archive written
+   somewhere else — a local drive or a stick — holding the state and every
+   photo, so the folder can be put back and the work restored.
+   ========================================================================= */
+
+let safetyInfo = null;
+
+function safetySupported() {
+  return !!(DESK && typeof DESK.safety_info === "function");
+}
+
+function fmtWhen(iso) {
+  if (!iso) return "never";
+  return String(iso).replace("T", " ").slice(0, 16);
+}
+
+async function refreshSafety() {
+  if (!safetySupported()) return null;
+  try { safetyInfo = await DESK.safety_info(); }
+  catch (e) { safetyInfo = null; }
+  return safetyInfo;
+}
+
+async function renderSafetyPanel() {
+  const box = $("#safetyBox");
+  if (!box) return;
+
+  if (!safetySupported()) {
+    box.innerHTML = '<div class="tiny">Safety copies need the desktop app. In a ' +
+      "browser, export a backup with photos and keep it somewhere else.</div>";
+    return;
+  }
+
+  const info = safetyInfo || (await refreshSafety()) || {};
+  const list = info.archives || [];
+
+  box.innerHTML =
+    '<div class="sub">A copy of everything — the work and the photographs — ' +
+    "written outside the app's folder. If the folder is deleted, this is what " +
+    "puts it back.</div>" +
+
+    (!info.set
+      ? '<div class="banner bad"><div><b>No safety copy is being kept.</b> ' +
+        "If someone deletes the shared folder, everything goes with it." +
+        "</div></div>"
+      : info.onShare
+        ? '<div class="banner bad"><div><b>The copies are on the same share.</b> ' +
+          "That is no protection against the share being deleted. Choose a " +
+          "folder on this computer instead.</div></div>"
+        : '<div class="banner ok"><div>Copies are kept at ' + esc(info.path) +
+          "</div></div>") +
+
+    '<div class="row" style="margin-top:10px">' +
+      '<button class="btn sm primary" id="safetyPick">' +
+        (info.set ? "Change folder" : "Choose a folder") + "</button>" +
+      (info.set ? '<button class="btn sm" id="safetyNow">Copy now</button>' : "") +
+      (info.set ? '<button class="btn sm ghost" id="safetyOpen">Open folder</button>' : "") +
+    "</div>" +
+
+    (info.set
+      ? '<div class="tiny" style="margin-top:9px">Last copy ' + esc(fmtWhen(info.lastAt)) +
+        " · one is written whenever you close the app, and the newest ten are kept." +
+        "</div>"
+      : '<div class="tiny" style="margin-top:9px">Suggested: ' + esc(info.suggested || "") + "</div>") +
+
+    (list.length
+      ? '<h3 style="margin:14px 0 8px">Copies you can restore</h3>' +
+        list.slice(0, 10).map(a =>
+          '<div class="filerow">' +
+            '<span class="fi">' + (a.broken ? "!" : "ZIP") + "</span>" +
+            '<span class="grow"><span class="fn">' + esc(fmtWhen(a.at)) + "</span>" +
+            '<span class="fm">' +
+              (a.broken ? "unreadable" :
+                esc(String(a.label || a.device || "")) + " · " +
+                Math.round((a.bytes || 0) / 1024) + " KB · " +
+                (a.media || 0) + " photo" + ((a.media || 0) === 1 ? "" : "s")) +
+            "</span></span>" +
+            (a.broken ? "" : '<button class="btn sm" data-restore="' + esc(a.name) + '">Restore</button>') +
+          "</div>").join("")
+      : "");
+
+  $("#safetyPick").onclick = async () => {
+    if (typeof DESK.pick_folder !== "function") { toast("Not available."); return; }
+    const picked = await DESK.pick_folder();
+    if (!picked || !picked.ok) return;
+    const r = await DESK.set_safety_path(picked.path);
+    if (!r || !r.ok) { toast((r && r.error) || "Could not use that folder"); return; }
+    await DESK.safety_copy_now("first copy");
+    await refreshSafety();
+    renderSafetyPanel();
+    toast("Safety copies will be kept there");
+  };
+
+  const now = $("#safetyNow");
+  if (now) now.onclick = async () => {
+    now.textContent = "Copying…";
+    const r = await DESK.safety_copy_now("manual");
+    await refreshSafety();
+    renderSafetyPanel();
+    toast(r && r.ok
+      ? "Copied — " + Math.round((r.bytes || 0) / 1024) + " KB, " + (r.media || 0) + " photos"
+      : (r && r.error) || "Could not write the copy");
+  };
+
+  const open = $("#safetyOpen");
+  if (open) open.onclick = () => {
+    if (typeof DESK.open_path === "function") DESK.open_path(info.path);
+  };
+
+  $$("#safetyBox [data-restore]").forEach(b => {
+    b.onclick = async () => {
+      if (!confirm("Restore this copy?\n\nEverything on this computer is replaced by " +
+                   "what the copy holds. The current state is saved as a restore " +
+                   "point first, so this can be undone.")) return;
+      const r = await DESK.restore_safety_archive(b.dataset.restore);
+      if (!r || !r.ok) { toast((r && r.error) || "Could not restore"); return; }
+      STATE = migrate(JSON.parse(r.state));
+      dirty = false;
+      syncState.lastPush = "";           /* our state changed wholesale — share it */
+      toast("Restored, with " + (r.media || 0) + " photos");
+      show("dashboard");
+    };
+  });
+}
+
+/* A word on the dashboard when nothing is protecting the data. */
+function safetyWarning() {
+  if (!safetySupported() || !safetyInfo) return "";
+  if (!safetyInfo.set) {
+    return "No safety copy is being kept. If the shared folder is deleted, " +
+      "everything goes with it.";
+  }
+  if (safetyInfo.onShare) {
+    return "Safety copies are on the same share as the app, which is no " +
+      "protection against the share being deleted.";
+  }
+  return "";
+}
+
+/* ============================================================================
+   Activation.
+
+   Only meaningful in the desktop shell, and only when that build was compiled
+   with licensing switched on. Everything here degrades to "no licence needed"
+   otherwise, so nobody is ever locked out by accident.
+   ========================================================================= */
+
+let licence = null;
+
+async function checkLicence() {
+  if (!DESK || typeof DESK.licence_status !== "function") {
+    licence = { required: false, ok: true };
+    return licence;
+  }
+  try { licence = await DESK.licence_status(); }
+  catch (e) { licence = { required: false, ok: true }; }
+  return licence;
+}
+
+function licenceOK() {
+  return !licence || !licence.required || licence.ok;
+}
+
+/* A full-screen gate. Nothing else is reachable until a licence is accepted.
+
+   A signed licence is around 130 characters — far too long to type — so it is
+   pasted, or loaded from a file on the licence holder's own stick. */
+function showActivation() {
+  const mid = (licence && licence.machineId) || "unknown";
+  const err = (licence && licence.error) || "";
+
+  document.body.innerHTML =
+    '<div class="wrap" style="max-width:620px;padding-top:34px">' +
+      '<div class="card">' +
+        '<div class="brand" style="margin-bottom:14px">' +
+          '<span class="mark">S2</span><span>SIRE 2.0 Prep</span></div>' +
+        "<h1>Activate this computer</h1>" +
+        '<div class="sub">This copy has not been activated here. Send the id ' +
+        "below to whoever supplied the app, and they will send back a licence.</div>" +
+        (err ? '<div class="banner bad"><div>' + esc(err) + "</div></div>" : "") +
+
+        '<div class="field"><label class="fl">This computer\'s id</label>' +
+          '<div class="selquote mono" id="actId">' + esc(mid) + "</div>" +
+          '<button class="btn sm ghost" id="actCopy" style="margin-top:6px">Copy the id</button>' +
+        "</div>" +
+
+        '<div class="field"><label class="fl" for="actKey">Licence</label>' +
+          '<textarea id="actKey" style="min-height:96px;font-family:var(--mono);' +
+          'font-size:12.5px" placeholder="Paste the licence here" ' +
+          'spellcheck="false"></textarea></div>' +
+
+        '<div class="row">' +
+          '<button class="btn primary grow" id="actGo">Activate</button>' +
+          '<button class="btn" id="actFile">Load from a file</button>' +
+        "</div>" +
+        '<input type="file" id="actFileInput" accept=".lic,.txt,.json" class="hidden">' +
+
+        '<div class="tiny" style="margin-top:12px">A licence works on this ' +
+        "computer only. Copying the folder elsewhere will ask again.</div>" +
+      "</div>" +
+    "</div>";
+
+  $("#actCopy").onclick = async () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(mid);
+        toastless("Copied");
+        return;
+      }
+    } catch (e) { }
+    const r = document.createRange();
+    r.selectNodeContents($("#actId"));
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+  };
+
+  const submit = async () => {
+    const key = $("#actKey").value.trim();
+    if (!key) return;
+    const btn = $("#actGo");
+    btn.disabled = true;
+    btn.textContent = "Checking…";
+    let r = null;
+    try { r = await DESK.activate(key); }
+    catch (e) { r = { ok: false, error: "Could not check that licence." }; }
+    if (r && r.ok) {
+      btn.textContent = "Activated";
+      licence = { required: true, ok: true, machineId: mid, how: r.how, expiry: r.expiry };
+      restartAfterActivation();
+      return;
+    }
+    licence = Object.assign({}, licence, { error: (r && r.error) || "That licence was not accepted." });
+    showActivation();
+  };
+
+  $("#actGo").onclick = submit;
+  $("#actFile").onclick = () => $("#actFileInput").click();
+  $("#actFileInput").onchange = e => {
+    const f = (e.target.files || [])[0];
+    if (!f) return;
+    const fr = new FileReader();
+    fr.onload = () => {
+      let text = String(fr.result || "").trim();
+      /* a licences.json holds one per machine; take this machine's */
+      if (text.indexOf("{") === 0) {
+        try {
+          const obj = JSON.parse(text);
+          text = obj[mid] || obj.licence || "";
+        } catch (err) { /* leave it as it is and let the check complain */ }
+      }
+      $("#actKey").value = text;
+      submit();
+    };
+    fr.readAsText(f);
+  };
+  $("#actKey").focus();
+}
+
+/* The gate replaced the whole page, so the app is rebuilt from scratch. A
+   reload is the honest way to do that; the flag is there so the path can be
+   checked without one. */
+function restartAfterActivation() {
+  window.__activated = true;
+  try { window.location.reload(); } catch (e) { }
+}
+
+/* The toast element belongs to the app the gate has just torn down. */
+function toastless(msg) {
+  const b = $("#actCopy");
+  if (b) { b.textContent = msg; setTimeout(() => { b.textContent = "Copy the id"; }, 1500); }
+}
+
+/* An activation panel, so the machine id and licence state can be seen
+   without having to be locked out to find them. */
+function renderLicencePanel() {
+  const box = $("#licenceBox");
+  if (!box) return;
+
+  if (!licence || !licence.machineId) {
+    box.innerHTML = '<div class="tiny">This copy is not licensed — it runs ' +
+      "anywhere without a code.</div>";
+    return;
+  }
+
+  const req = !!licence.required;
+  box.innerHTML =
+    '<div class="tiny mono" style="margin-bottom:8px">This computer: ' +
+      esc(licence.machineId) + "</div>" +
+    (!req
+      ? '<div class="tiny">This build does not ask for a code. It will run on ' +
+        "any computer.</div>"
+      : licence.ok
+        ? '<div class="banner ok"><div>Activated' +
+          (licence.expiry
+            ? " until " + esc(licence.expiry.slice(6, 8) + "/" + licence.expiry.slice(4, 6) +
+              "/" + licence.expiry.slice(0, 4))
+            : "") + ".</div></div>"
+        : '<div class="banner bad"><div>Not activated.</div></div>') +
+    (req
+      ? '<div class="tiny" style="margin-top:8px">A licence works on this ' +
+        "computer only. Copying the folder to another machine will ask again.</div>"
+      : "");
+}
+
+/* ============================================================================
+   The ship's clock, on show.
+
+   One clock for everyone, taken from the shared folder rather than from the
+   computer in front of you. Adjusting it changes what everybody sees, because
+   the adjustment travels with the rest of the settings.
+   ========================================================================= */
+
+let clockTimer = null;
+
+function paintClock() {
+  const el = $("#clockNow");
+  if (!el) return;
+  el.textContent = shipClockText();
+  const btn = $("#btnClock");
+  if (btn) {
+    const shared = clockSource !== "this computer";
+    btn.classList.toggle("local", !shared);
+    btn.title = shared
+      ? "Ship time, shared by everyone using this folder"
+      : "This computer's clock — no shared folder to take the time from";
+  }
+}
+
+function startClock() {
+  paintClock();
+  if (clockTimer) clearInterval(clockTimer);
+  clockTimer = setInterval(paintClock, 15000);
+}
+
+function renderClockPanel() {
+  const box = $("#clockBox");
+  if (!box) return;
+
+  const shared = clockSource !== "this computer";
+  const adj = displayOffsetMin();
+  const localText = (() => {
+    const d = new Date();
+    const p = n => String(n).padStart(2, "0");
+    return p(d.getHours()) + ":" + p(d.getMinutes());
+  })();
+
+  box.innerHTML =
+    '<div class="clock-face">' + esc(shipClockText()) + "</div>" +
+    '<div class="small" style="margin-top:4px">' +
+      (shared
+        ? "Taken from the shared folder, so it reads the same on every computer."
+        : "Taken from this computer — there is no shared folder to read it from.") +
+    "</div>" +
+    '<div class="tiny" style="margin-top:8px">' +
+      "This computer says " + esc(localText) +
+      (adj ? " · adjustment " + (adj > 0 ? "+" : "") + adj + " min" : "") +
+    "</div>" +
+
+    '<div class="field" style="margin-top:14px">' +
+      "<label class=\"fl\" for=\"clockSet\">Set the ship's time</label>" +
+      '<div class="row"><input type="time" id="clockSet" class="grow" value="' +
+        esc(shipClockText()) + '">' +
+      '<button class="btn sm primary" id="clockApply">Set</button></div>' +
+    "</div>" +
+    (adj ? "<button class=\"btn sm ghost block\" id=\"clockReset\">Use the folder's time as it is</button>" : "") +
+
+    '<div class="tiny" style="margin-top:11px">Setting it here changes what ' +
+    "everyone sees, not what any computer's own clock says. Nobody needs to " +
+    "put their machine right, and changing a machine's zone will not upset " +
+    "anyone's work." +
+    (shared ? "" : " Once a shared folder is in use this becomes the shared clock.") +
+    "</div>";
+
+  $("#clockApply").onclick = () => {
+    const v = $("#clockSet").value;
+    if (!v || v.indexOf(":") === -1) return;
+    const parts = v.split(":");
+    const wanted = (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
+
+    const base = new Date(shipMillis());
+    const current = base.getUTCHours() * 60 + base.getUTCMinutes();
+
+    let diff = wanted - current;
+    while (diff > 720) diff -= 1440;         /* nearest, not a day away */
+    while (diff < -720) diff += 1440;
+
+    if (!STATE.settings) STATE.settings = {};
+    STATE.settings.shipOffsetMin = diff;
+    STATE.settings.modified = nowISO();
+    markDirty();
+
+    paintClock();
+    renderClockPanel();
+    toast(shared
+      ? "Ship time set — everyone will see it within a minute"
+      : "Ship time set");
+  };
+
+  const reset = $("#clockReset");
+  if (reset) reset.onclick = () => {
+    STATE.settings.shipOffsetMin = 0;
+    STATE.settings.modified = nowISO();
+    markDirty();
+    paintClock();
+    renderClockPanel();
+    toast("Adjustment cleared");
   };
 }
 
@@ -16791,6 +17454,7 @@ function wire() {
     b.onclick = () => show(b.dataset.go);
   });
   $("#btnTheme").onclick = cycleTheme;
+  $("#btnClock").onclick = () => show("settings");
   $("#btnMore").onclick = openMoreSheet;
   $("#photoInput").onchange = onPhotoInput;
   $("#cameraInput").onchange = onCameraInput;
@@ -16906,6 +17570,12 @@ async function boot() {
   }
 
   await Store.init();
+
+  /* Nothing is shown until the licence is settled — but a build without
+     licensing, and every browser, passes straight through. */
+  await checkLicence();
+  if (!licenceOK()) { showActivation(); return; }
+
   STATE = migrate(await Store.load());
 
   if (!STATE.campaigns.length) {
@@ -16928,7 +17598,11 @@ async function boot() {
 
   wire();
   wireReports();
+  startClock();
   if (syncSupported()) startSync();
+  if (safetySupported()) refreshSafety().then(() => {
+    if (currentView === "dashboard") renderDashboard();
+  });
   wirePublications();
   wireLinks();
   initBackHandling();
